@@ -395,45 +395,122 @@ function pointInRing(pt: Point2D, ring: PolygonRing): boolean {
 }
 
 /**
- * Expands an open or closed polyline with strokeWidth into a closed solid ribbon polygon
- * so stroke-only SVGs (fill="none", stroke="...") import cleanly as solid shapes.
+ * Checks whether `inner` ring is genuinely enclosed inside `outer` ring
+ * (not merely overlapping/crossing it). Requires smaller area and >= 90% of vertices inside.
  */
-function expandStrokedPolyline(pts: Point2D[], halfWidth: number, closed: boolean): PolygonRing {
+function isRingContainedIn(inner: PolygonRing, outer: PolygonRing, innerAbsArea: number, outerAbsArea: number): boolean {
+  if (innerAbsArea >= outerAbsArea * 0.999) return false;
+  const step = Math.max(1, Math.floor(inner.length / 12));
+  let tested = 0;
+  let insideCount = 0;
+  for (let i = 0; i < inner.length; i += step) {
+    tested++;
+    if (pointInRing(inner[i], outer)) insideCount++;
+  }
+  return tested > 0 && insideCount / tested >= 0.9;
+}
+
+/**
+ * Expands an open or closed polyline with strokeWidth into closed solid polygon ring(s):
+ * - Closed loops produce TWO separate rings (outer + inner hole) with zero seam gap.
+ * - Open paths produce ONE closed ribbon ring with miter-clamped corners.
+ */
+function expandStrokedPolyline(pts: Point2D[], halfWidth: number, closed: boolean): PolygonRing[] {
   const n = pts.length;
   if (n < 2 || halfWidth <= 1e-4) return [];
 
   const left: Point2D[] = [];
   const right: Point2D[] = [];
+  const miterLimit = 2.4;
 
   for (let i = 0; i < n; i++) {
-    const prev = pts[i > 0 ? i - 1 : closed ? n - 1 : i];
     const curr = pts[i];
-    const next = pts[i < n - 1 ? i + 1 : closed ? 0 : i];
+    const hasPrev = closed || i > 0;
+    const hasNext = closed || i < n - 1;
+    const prev = hasPrev ? pts[(i - 1 + n) % n] : curr;
+    const next = hasNext ? pts[(i + 1) % n] : curr;
 
-    let dx = next.x - prev.x;
-    let dy = next.y - prev.y;
-    const l = Math.hypot(dx, dy);
-    if (l < 1e-6) continue;
-    dx /= l;
-    dy /= l;
+    let n1x = 0, n1y = 0, hasN1 = false;
+    if (hasPrev) {
+      const dx = curr.x - prev.x;
+      const dy = curr.y - prev.y;
+      const l = Math.hypot(dx, dy);
+      if (l > 1e-6) {
+        n1x = -dy / l;
+        n1y = dx / l;
+        hasN1 = true;
+      }
+    }
 
-    const nx = -dy * halfWidth;
-    const ny = dx * halfWidth;
-    left.push({ x: curr.x + nx, y: curr.y + ny });
-    right.push({ x: curr.x - nx, y: curr.y - ny });
+    let n2x = 0, n2y = 0, hasN2 = false;
+    if (hasNext) {
+      const dx = next.x - curr.x;
+      const dy = next.y - curr.y;
+      const l = Math.hypot(dx, dy);
+      if (l > 1e-6) {
+        n2x = -dy / l;
+        n2y = dx / l;
+        hasN2 = true;
+      }
+    }
+
+    let ox = 0, oy = 0;
+    if (hasN1 && hasN2) {
+      let bx = n1x + n2x;
+      let by = n1y + n2y;
+      const bLen = Math.hypot(bx, by);
+      if (bLen < 1e-5) {
+        ox = n1x * halfWidth;
+        oy = n1y * halfWidth;
+      } else {
+        bx /= bLen;
+        by /= bLen;
+        const dot = Math.max(0.3, bx * n1x + by * n1y);
+        const shift = halfWidth * Math.min(miterLimit, 1 / dot);
+        ox = bx * shift;
+        oy = by * shift;
+      }
+    } else if (hasN1) {
+      ox = n1x * halfWidth;
+      oy = n1y * halfWidth;
+    } else if (hasN2) {
+      ox = n2x * halfWidth;
+      oy = n2y * halfWidth;
+    } else {
+      continue;
+    }
+
+    left.push({ x: curr.x + ox, y: curr.y + oy });
+    right.push({ x: curr.x - ox, y: curr.y - oy });
   }
 
-  return dedupeRing([...left, ...right.reverse()]);
+  if (closed) {
+    const r1 = dedupeRing(left);
+    const r2 = dedupeRing(right);
+    const out: PolygonRing[] = [];
+    if (r1.length >= 3) out.push(r1);
+    if (r2.length >= 3) out.push(r2);
+    return out;
+  }
+
+  const ribbon = dedupeRing([...left, ...right.reverse()]);
+  return ribbon.length >= 3 ? [ribbon] : [];
 }
 
-function isElementVisible(el: Element): { visible: boolean; strokedOnly: boolean; strokeWidth: number } {
+function isPureWhiteColor(color: string | null | undefined): boolean {
+  if (!color) return false;
+  const c = color.replace(/\s+/g, '').toLowerCase();
+  return c === '#fff' || c === '#ffffff' || c === 'white' || c === 'rgb(255,255,255)' || c === 'rgba(255,255,255,1)';
+}
+
+function isElementVisible(el: Element): { visible: boolean; strokedOnly: boolean; strokeWidth: number; isWhiteOnly: boolean } {
   const style = window.getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') {
-    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+    return { visible: false, strokedOnly: false, strokeWidth: 0, isWhiteOnly: false };
   }
   const opacity = parseFloat(style.opacity || '1');
   if (!Number.isNaN(opacity) && opacity <= 0.01) {
-    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+    return { visible: false, strokedOnly: false, strokeWidth: 0, isWhiteOnly: false };
   }
 
   const fillAttr = el.getAttribute('fill')?.trim().toLowerCase();
@@ -448,10 +525,14 @@ function isElementVisible(el: Element): { visible: boolean; strokedOnly: boolean
 
   if (fillNone && (strokeNone || sw <= 0)) {
     // Invisible artboard / bounding box rectangle (e.g., <rect width="512" height="512" fill="none"/>)
-    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+    return { visible: false, strokedOnly: false, strokeWidth: 0, isWhiteOnly: false };
   }
 
-  return { visible: true, strokedOnly: fillNone && !strokeNone && sw > 0, strokeWidth: sw };
+  const strokedOnly = fillNone && !strokeNone && sw > 0;
+  const activeColor = strokedOnly ? (strokeAttr || style.stroke) : (fillAttr || style.fill);
+  const isWhiteOnly = isPureWhiteColor(activeColor);
+
+  return { visible: true, strokedOnly, strokeWidth: sw, isWhiteOnly };
 }
 
 /**
@@ -475,7 +556,8 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
   host.style.pointerEvents = 'none';
   document.body.appendChild(host);
 
-  const rawRings: PolygonRing[] = [];
+  const coloredRings: PolygonRing[] = [];
+  const whiteRings: PolygonRing[] = [];
   const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   host.appendChild(tempPath);
 
@@ -499,6 +581,7 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
       const vis = isElementVisible(el);
       if (!vis.visible) return;
 
+      const targetList = vis.isWhiteOnly ? whiteRings : coloredRings;
       const geomEl = el as unknown as SVGGeometryElement;
       const elCtm = geomEl.getCTM?.();
       const relCtm = elCtm && invRootCtm ? invRootCtm.multiply(elCtm) : elCtm;
@@ -516,10 +599,12 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
         if (vis.strokedOnly) {
           const scaleFactor = relCtm ? Math.hypot(relCtm.a, relCtm.b) : 1;
           const halfW = (vis.strokeWidth * Math.max(0.01, scaleFactor)) * 0.5;
-          const ribbon = expandStrokedPolyline(cleaned, halfW, closed);
-          if (ribbon.length >= 3) rawRings.push(ribbon);
+          const expanded = expandStrokedPolyline(cleaned, halfW, closed);
+          for (const r of expanded) {
+            if (r.length >= 3) targetList.push(r);
+          }
         } else if (cleaned.length >= 3) {
-          rawRings.push(cleaned);
+          targetList.push(cleaned);
         }
       };
 
@@ -622,6 +707,7 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
     host.remove();
   }
 
+  const rawRings = coloredRings.length > 0 ? coloredRings : whiteRings;
   if (rawRings.length === 0) return null;
 
   // Normalize bounding box to center at (0,0) and max dimension = 20 mm
@@ -654,13 +740,14 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
     }))
   );
 
-  // Assign evenodd nesting parity: rings enclosed by an odd number of other rings are holes (CW negative)
+  // Assign true containment nesting parity: only rings genuinely enclosed inside a larger ring
+  // are holes (CW negative); overlapping/crossing solid parts stay outer (CCW positive) for nonzero union!
+  const areas = centered.map((r) => Math.abs(computeCompoundArea([r])));
   const oriented: CompoundPolygon = centered.map((ring, idx) => {
-    const sample = ring[0];
     let depth = 0;
     for (let j = 0; j < centered.length; j++) {
       if (j === idx) continue;
-      if (pointInRing(sample, centered[j])) depth++;
+      if (isRingContainedIn(ring, centered[j], areas[idx], areas[j])) depth++;
     }
     const isOuter = depth % 2 === 0;
     return normalizeRingWinding(ring, isOuter);

@@ -115,7 +115,7 @@ export async function exportRasterImage(
         }
         ctx.closePath();
       }
-      if (shouldFill) ctx.fill('evenodd');
+      if (shouldFill) ctx.fill('nonzero');
       if (shouldStroke) {
         ctx.lineWidth = state.studioMode === 'cad_wireframe' ? 0.6 : state.strokeWidth;
         ctx.stroke();
@@ -125,7 +125,7 @@ export async function exportRasterImage(
       ctx.translate(inst.x, inst.y);
       ctx.rotate(inst.angle);
       ctx.scale(inst.scale, inst.scale);
-      if (shouldFill) ctx.fill(basePath, 'evenodd');
+      if (shouldFill) ctx.fill(basePath, 'nonzero');
       if (shouldStroke) {
         const sw = state.studioMode === 'cad_wireframe' ? 0.6 : state.strokeWidth;
         ctx.lineWidth = sw / Math.max(0.1, inst.scale);

@@ -483,7 +483,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
         }
         if (shouldFill) {
           ctx.fillStyle = fillCol;
-          ctx.fill('evenodd');
+          ctx.fill('nonzero');
         }
         if (shouldStroke) {
           ctx.strokeStyle = strokeCol;
@@ -498,7 +498,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({
 
         if (shouldFill) {
           ctx.fillStyle = fillCol;
-          ctx.fill(cachedBasePath, 'evenodd');
+          ctx.fill(cachedBasePath, 'nonzero');
         }
         if (shouldStroke) {
           ctx.strokeStyle = strokeCol;
