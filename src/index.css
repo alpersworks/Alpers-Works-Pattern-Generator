@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+:root {
+  /* Alper's Works — Surfaces (Swiss Minimalist Identity) */
+  --aw-bg-app: #FFFFFF;
+  --aw-bg-sidebar: #FAFAFA;
+  --aw-bg-subtle: #F4F4F5;
+  --aw-bg-canvas-stage: #F0F0F2;
+
+  /* Alper's Works — Ink & Typographic Hierarchy (WCAG 2.1 Verified) */
+  --aw-ink-primary: #1A1A1A;
+  --aw-ink-brand: #2D2D2D;
+  --aw-ink-secondary: #595959;
+  --aw-ink-muted: #737373;
+
+  /* Structural & Interactive Borders */
+  --aw-border-subtle: #E4E4E7;
+  --aw-border-control: #94949C;
+  --aw-border-focus: #1A1A1A;
+
+  /* Functional Engineering Telemetry (OAR & Bridge Status Only) */
+  --aw-status-ok: #15803D;
+  --aw-status-warn: #B45309;
+  --aw-status-error: #B91C1C;
+
+  /* Font Stacks */
+  --font-display: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    font-family: var(--font-sans);
+    background-color: var(--aw-bg-app);
+    color: var(--aw-ink-primary);
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--aw-border-focus);
+    outline-offset: 2px;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Crisp custom range slider aligned with Alper's Works charcoal identity */
+input[type='range'].aw-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #E4E4E7;
+  cursor: pointer;
+}
+
+input[type='range'].aw-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1A1A1A;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 0 0 1px #1A1A1A;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input[type='range'].aw-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+input[type='range'].aw-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1A1A1A;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 0 0 1px #1A1A1A;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Quiet minimal scrollbars for control panels */
+.aw-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.aw-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aw-scroll::-webkit-scrollbar-thumb {
+  background: #D4D4D8;
+  border-radius: 3px;
+}
+
+.aw-scroll::-webkit-scrollbar-thumb:hover {
+  background: #A1A1AA;
+}

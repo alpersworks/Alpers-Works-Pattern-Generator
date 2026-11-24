@@ -1,0 +1,495 @@
+﻿Alper's Works Pattern Generator: Ürün Stratejisi, Modern Arayüz Tasarımı ve Açık Kaynak Mimari Planı
+Mevcut PATTERN Automotive Parametric Studio prototipin, internetteki genel amaçlı SVG desen araçlarında bulunmayan güçlü bir mühendislik çekirdeği barındırıyor: 1:1 gerçek milimetre ölçeği, C¹ sürekli adaptif radyal kenar sıkıştırma algoritması, sekiz farklı desen topolojisi ve doğrudan tarayıcı içi CAD DXF çıktısı projeyi şimdiden ayırt edici kılıyor1. Projeyi Alper's Works Pattern Generator adıyla GitHub’da açık kaynaklı yayınlayıp Vercel üzerinden herkese açık bir stüdyoya dönüştürmek için üç eksende kapsamlı bir yenileme gerekiyor: internetteki grafik ve CAD/CNC rakiplerinde olup sende eksik kalan kritik yeteneklerin (hazır şablonlar, sürüklenebilir çoklu çekici, görsel parlaklık haritası, lazer kerf telafisi, köprü kalınlığı uyarısı, renk/PNG/CSS çıktıları, geri al/yinele ve URL ile paylaşım) eklenmesi3; arayüzün eklediğin ALPER'S WORKS web sitesi ekran görüntüsündeki saf beyaz-antrasit minimalist kimliğe uyarlanarak Simple ve Advanced modlarına ayrılması2; ve mevcut koddaki yedi somut teknik hata ile performans darboğazının giderilmesi1.
+Kod denetimi, görsel yenileme kadar çekirdek mühendislik düzeltmelerinin de acil olduğunu gösteriyor. Mevcut kodda tüm motifler için sabit alan varsayılması akustik açık alan oranında (OAR) %41,9’a varan sapmaya yol açarken, odak kenara yaklaştığında OAR %12,4 eksik hesaplanıyor; varsayılan ayarlarda delikler arası minimum köprü kalınlığı sac yırtılma sınırındaki 0,73 mm’ye düşüyor; özel SVG yükleyicisi yalnızca <path> etiketlerini okuyarak içi boş veya çoklu şekilleri bozuyor; Fibonacci spiralindeki sabit tavan geniş panellerin %36,3’ünden fazlasını boş bırakıyor; DXF çıktısında metrik birim değişkeni ($MEASUREMENT) ve panel dış çerçevesi eksik kalıyor; yoğun ayarlarda ise 105.566 SVG DOM düğümü üretilerek tarayıcı kilitleniyor1. Bu hatalar Canvas 2D hibrit render motoru, Shoelace alan hesabı, uzamsal karma (spatial hash) köprü denetimi ve modüler Vite + TypeScript + Tailwind CSS v4 mimarisiyle çözüldüğünde, Alper's Works Pattern Generator hem grafik tasarımcılar hem de endüstriyel tasarımcılar için pazarda boş duran ücretsiz, sınırsız ve MIT lisanslı bir köprü stüdyo konumuna yerleşecektir2.
+Mevcut PATTERN Studio Kodunun Teknik ve İşlevsel Denetimi
+Ayırt Edici Mühendislik Güçlü Yönleri
+Mevcut HTML/CSS/JS kodu, dekoratif arka plan üreten web araçlarından dört temel mühendislik üstünlüğüyle ayrılır1. Birincisi, 1:1 metrik (mm) çalışma uzayıdır: panel genişliği (600–2200 mm) ve yüksekliği (300–1200 mm) doğrudan gerçek dünya milimetresi cinsinden tanımlanır; Illustrator uyumlu SVG çıktısında boyutlar mm birimiyle yazılırken, DXF çıktısında Y-ekseni ters çevrilerek (panelH - pt.y) CAD koordinat sistemine uyarlanır1. İkincisi, C¹ sürekli adaptif radyal kenar sıkıştırma (warpPoint) algoritmasıdır. Çoğu perforasyon aracı odak noktasından uzaklaştıkça yalnızca delik ölçeğini küçültüp kenarlarda geniş boşluklar bırakırken, mevcut koddaki parçalı radyal büküm fonksiyonu geçiş yarıçapı R ve dış bölge sıkıştırma oranı k (edgeSpacingRatio) için delik hatvesini (pitch) yumuşak biçimde sıkıştırır1:
+  
+
+Bu fonksiyonun türevi merkezde 1,0 değerinden başlayıp r = R sınırında kesintisiz biçimde k değerine ulaştığı ve r > R bölgesinde sabit k kaldığı için C¹ süreklidir; geçiş sınırında ani bir yoğunluk kırılması oluşmaz2. Üçüncü güçlü yön, Hermite smoothstep (3t² − 2t³) eğrisiyle çalışan iki devamlılık modudur (infinite_lattice ile tüm paneli kaplayan homojen mikro-doku ve isolated_island ile yalnızca hoparlör çevresinde sönümlenen ada dokusu)1. Dördüncüsü ise sekiz topolojinin (Heksagonal, Genesis G-Matrix, Kademeli Matris, Dalgalı Akış, Vorteks, Fibonacci Spiral, Radyal Konsantrik ve Çift Merkezli Woofer+Tweeter), beş otomotiv motifinin, üç yönlendirme modunun ve Sol/Merkez/Sağ pivot kontrolünün tek bir çekirdekte birleşmiş olmasıdır1.
+Mühendislik açısından göz önünde bulundurulması gereken ince bir matematiksel davranış da warpPoint fonksiyonunun oluşturduğu yönsel anizotropidir: r = R geçiş sınırında radyal sıkışma k oranındayken teğetsel sıkışma (1 + k) / 2 düzeyindedir2. Varsayılan k = 0,60 ayarında sınırda 1,33× olan bu oran, k = 0,35 gibi agresif kenar sıkıştırmalarında 1,93× düzeyine çıkar ve r = 3R uzaklığında 1,31× seviyesine yumuşar2. Advanced modunda bu etkiyi açıklayan kısa bir araç ipucu sunmak, endüstriyel tasarımcıların beklediği davranışı öngörmesini kolaylaştıracaktır.
+Koddaki Yedi Kritik Teknik Hata ve Darboğaz
+Açık kaynak yayını öncesinde giderilmesi gereken yedi somut hata ve mimari kısıt, mevcut kodun incelenmesi ve sayısal doğrulamalarla belirlenmiştir1.
+
+
+Hata / Kısıt Alanı
+	Mevcut Koddaki Durum
+	Sayısal Etki / Üretim Riski
+	Hedef v2 Çözümü
+	OAR Alan Yaklaşıklığı
+	Her motifin alanı sabit (scale * 22) * (scale * 12) = 264 mm² kabul edilir ve %65 tavanına kırpılır1.
+	pattern_chevron için +%41,9, pattern_pill için +%25,7, pattern_trapezoid için +%15,8 hatalı OAR ölçümü2.
+	İşaretli Shoelace poligon alanı formülüyle her yerleşik motif ve özel SVG için kesin alan hesabı2.
+	Kenarda OAR Sapması
+	Aktif bölge alanı odak konumu ne olursa olsun tam daire (πR²) alınır1.
+	focusX = %10, R = 220 mm iken dairenin 18.883 mm²’si (%12,4) panel dışına taşar; OAR %12,4 eksik raporlanır2.
+	Daire-dikdörtgen kesişim alanı + ayrı Odak OAR ve Tüm Panel OAR göstergesi2.
+	Köprü Kalınlığı ve Çakışma
+	Komşu delikler arası minimum et (ligament) kalınlığı denetlenmez1.
+	Varsayılan ayarlarda minimum köprü 0,73 mm (1 mm+ sacda yırtılma riski); centerScale = 2,0 iken 12,35 mm çakışma2.
+	Tekdüze Uzamsal Karma (Spatial Hash) ile gerçek zamanlı minimum köprü uyarısı ve çakışma vurgusu2.
+	Kırılgan SVG Yükleyici
+	Yalnızca <path> etiketlerini işler, tüm yolları birleştirip tek poligon gibi 48 noktadan örnekler1.
+	<rect>, <circle>, <polygon> sessizce başarısız olur; içi boş harf/logolarda sahte çapraz kesim çizgisi oluşur1.
+	Tüm SVG şekillerini destekleyen, alt yolları ve evenodd boşluklarını koruyan evrensel ve arındırılmış ayrıştırıcı18.
+	Fibonacci Spiral Sınırı
+	totalPoints değeri sabit 1600 ile sınırlandırılmıştır1.
+	1400 × 600 mm panelde her iki yanda 254,1 mm (%36,3), 2200 × 1200 mm panelde 654,1 mm alan boş kalır2.
+	Panel köşe mesafesine göre dinamik üst sınır hesabı2.
+	SVG DOM Performansı
+	Her kaydırıcı hareketinde tüm <path> DOM düğümleri ana iş parçacığında silinip yeniden üretilir1.
+	Yoğun ayarda 9.206, en yoğun uç ayarda 105.566 SVG düğümü (243.270 iterasyon) tarayıcıyı kilitler2.
+	Canlı önizleme için Canvas 2D (Path2D + HiDPI), dışa aktarma için saf geometriden kayıpsız vektör üretimi11.
+	DXF Birim ve Katmanlar
+	AC1009 (R12) başlığına R12-dışı $INSUNITS yazar; $MEASUREMENT = 1 ve dış çerçeve katmanı yoktur1.
+	Bazı CAM/lazer yazılımları dosyayı inç (Imperial) okuyabilir; panel dış kesim çerçevesi eksiktir7.
+	Kütüphane destekli geçerli DXF üretimi ($INSUNITS = 4, $MEASUREMENT = 1) ve çoklu katman ayrımı10.
+	  
+
+Bu bulgular, projenin yalnızca görsel bir makyajla değil, çekirdek geometri ve çizim motoru yenilemesiyle yayınlanması gerektiğini açıkça ortaya koyar. Bir akustik tasarımcısı pattern_chevron motifini seçtiğinde mevcut arayüz %40’ın üzerinde akustik olarak şeffaf bir oran gösterebilirken, gerçek açık alan %30’un altında kalarak yüksek frekanslı sesleri bastırabilir2. Benzer biçimde, web tabanlı SVG üreticilerinin performans rehberliğinde de vurgulandığı üzere birkaç bin şeklin üzerindeki SVG DOM yükü tarayıcının ana iş parçacığını zorlar; kullanıcının hatve kaydırıcısını sola çektiğinde 105 bin düğüm yüzünden sekmenin donması açık kaynak projedeki ilk deneyimi doğrudan zedeler2. Koddaki bir diğer yapısal eksiklik de kenar boşluğunun 10 mm olarak sabit kodlanması (`x < 10 |
+| x > panelW - 10`) ve kontrolün yalnızca delik merkezine uygulanmasıdır; büyük ölçekli bir motif kenara yaklaştığında delik konturu panel sınırından dışarı taşabilir1.
+Pazar Karşılaştırması ve Özellik Boşluğu Analizi
+İnternetteki web tabanlı desen uygulamaları incelendiğinde pazarın iki ayrı ekosisteme bölündüğü görülür: hızlı web/grafik SVG arka plan üreticileri ve endüstriyel CAD/CNC perforasyon araçları3. Mevcut prototipinin bu iki dünya arasındaki konumunu netleştirmek, eklenmesi gereken özellikleri gereksiz şişkinlik yaratmadan önceliklendirmeyi sağlar.
+Grafik ve Web Odaklı SVG Desen Araçları
+Haikei, Pattern Monster, MagicPattern, Super Designer, ThemeXpert SVG Pattern Generator ve Fffuel gibi popüler web araçları, arayüz tasarımcıları ve geliştiriciler için sürtünmesiz deneyimin standardını belirler3. Bu araçlarda kullanıcıların artık doğal beklentisi hâline gelen ancak mevcut prototipinde bulunmayan temel kolaylıkların başında hazır şablonlar (presets) ve tek tıkla rastgeleleştirme gelir: Haikei’nin zar (dice) butonu saniyeler içinde yeni varyasyonlar üretirken3, ThemeXpert’in deterministik tohum (seed) kaydırıcısı aynı sayısal tohumla birebir aynı desene geri dönmeyi sağlar5; Pattern Monster ise Pro katmanında rastgele üretim sırasında beğenilen ayarları sabitleyen kontrol kilitleme özelliği sunar4.
+Grafik ekosisteminin ikinci ortak paydası görsel özelleştirme ve çıktı çeşitliliğidir. Hemen tüm araçlar arka plan rengi, motif dolgu/kontur seçimi, şeffaf arka plan seçeneği, yaygın sosyal medya/sunum tuval oranları ve doğrudan kopyalanabilir CSS background-image ile yüksek çözünürlüklü PNG/WebP çıktısı verir3. Buna ek olarak ThemeXpert gibi modern tarayıcı içi araçlar, tüm kaydırıcıları ve renkleri sayfa URL’sine yazarak hesap veya sunucu gerektirmeden tek linkle birebir ayar paylaşımı (shareable URL state), canlı şekil sayısı göstergesi ve ticari kullanımda tamamen serbest çıktı güvencesi sunar5. Geri al/yinele (Undo/Redo) geçmişi de deneme-yanılma sürecinde kullanıcıların elini rahatlatan temel bir beklentidir.
+Endüstriyel Tasarım ve CAD/CNC Perforasyon Araçları
+Diğer uçta yer alan SolidVents, HoleSnap, MeshBox, MuralDXF ve ParametricTools, hoparlör ızgaraları, havalandırma panelleri, mimari cepheler ve lazer/CNC kesim süreçlerine odaklanır6. Senin mevcut prototipin, C¹ adaptif kenar sıkıştırması ve otomotiv motif diliyle doğrudan bu profesyonel segmente hitap etse de söz konusu rakiplerde bulunan beş yüksek değerli üretim özelliği şu an eksiktir.
+Bunların ilki, tuval üzerinde doğrudan sürüklenebilen çoklu çekici (multi-attractor) sistemidir: SolidVents, tuvali etkileşimli bir kontrol yüzeyine dönüştürerek birden fazla nokta, çizgi veya eğri çekicisi bırakıp bunlarla delik boyutunu, aralığını ve açısını canlı biçimde yönetmeye olanak tanır6; mevcut kodunda ise yalnızca tek odak noktası veya sabit ofsetli çift merkezli (dual) topoloji yer alır1. İkinci kritik eksiklik, SolidVents, HoleSnap ve MyLaserTools’ta standart hâle gelen görsel parlaklık haritasıdır (Image / Halftone Controller): kullanıcı herhangi bir fotoğraf veya logo yükleyip piksel parlaklığıyla delik boyutunu, aralığını veya açısını (Invert ve Contrast ayarlarıyla) parametrik olarak modüle edebilir6. Üçüncüsü, HoleSnap’in sunduğu canlı köprü kalınlığı (bridge width) takibi29 ile MeshBox ve SolidVents’in sunduğu ayarlanabilir kenar çerçeve payı (border margin), dairesel/yuvarlatılmış panel geometrisi ve kenar kırpma davranışlarıdır (Center Point, Complete Area, Boundary Clipping / Clean Edge Snapping)7. Dördüncüsü, MeshBox’ın öne çıkardığı lazer kerf (kesim boşluğu) telafisi (0–1 mm) ve görsel önizleme SVG’sinden ayrı olarak üretilen lazer kesime hazır kırmızı konturlu SVG çıktısıdır7. Beşincisi ise SolidVents, HoleSnap ve MuralDXF’te bulunan 3D STEP (.stp) katı model çıktısıdır6; ancak tarayıcı içi WASM paket boyutu ödünleşimi nedeniyle bu özellik ilk sürüm çekirdeği yerine Bölüm 5’te detaylandırılan opsiyonel v2.1 modülü olarak konumlandırılmalıdır39.
+  
+
+Özellik matrisi, Alper's Works Pattern Generator için net bir stratejik fırsat ortaya koyar: grafik odaklı araçlarda 1:1 mm metrik mühendislik ve DXF üretimi bulunmazken, profesyonel perforasyon araçları kapalı kaynaklıdır ve ücretli/kısıtlı katmanlarla çalışır (örneğin SolidVents ücretsiz planda günde 3 dışa aktarmayla sınırlıdır ve Pro paketi yıllık 90 USD’dir6). Alper's Works, C¹ sürekli adaptif kenar sıkıştırma mirasını tamamen ücretsiz, sınırsız, tarayıcı içi ve MIT lisanslı bir açık kaynak stüdyoda grafik çıktılarla birleştirerek iki kullanıcı grubunun da aradığı boşluğu doldurur.
+Alper's Works Görsel Kimliği ve Minimalist Tasarım Sistemi
+Web Sitesi Ekran Görüntüsünün Görsel Çözümlemesi
+Paylaştığın ALPER'S WORKS web sitesi ekran görüntüsü, çağdaş endüstriyel tasarım portföylerine özgü İsviçre modernizmi çizgisinde yalın ve yüksek kontrastlı bir görsel dil sergiliyor. Eski prototipteki koyu zemin (#0b0d10), karanlık yan panel (#14161c) ve neon turkuaz (#00d2d3) vurgular, web sitenin mimari sükunetiyle doğrudan çelişmektedir1.
+Ekran görüntüsündeki kimlik dört temel estetik karara dayanır: saf beyaz (#FFFFFF) stüdyo yüzeyi ile ağır gölgeler yerine geniş negatif alan kullanımı; ALPER'S WORKS logosu ve DESIGN THINKING / CREATIVE SOLUTIONS büyük başlıklarında keskin siyah yerine hafifçe dengelenmiş koyu antrasit/grafit (#2D2D2D–#1A1A1A) mürekkep tonu; dairesel O/C formları ve sivri A/N köşeleriyle Paul Renner’ın 1927 tarihli Futura geleneğini taşıyan geometrik sans-serif tipografi41; ve dekoratif renklerden tamamen arındırılmış akromatik bir disiplin. Bu nedenle yeni Pattern Generator arayüzünde tüm birincil butonlar, aktif sekmeler ve kaydırıcı başlıkları koyu antrasit (#1A1A1A) olmalı; yeşil, kehribar ve kırmızı tonlar yalnızca mühendislik telemetri durumlarında (OAR yeterliliği, ince köprü uyarısı, çakışma hatası) işlevsel sinyal olarak görünmelidir.
+WCAG 2.1 Doğrulanmış Renk Paleti ve CSS Tasarım Tokenları
+Açık ve minimalist arayüzlerde sık düşülen bir tasarım hatası, estetik sadelik uğruna ikincil metinleri veya form kenarlıklarını aşırı açık gri seçerek erişilebilirliği bozmaktır. Aşağıdaki CSS değişkenleri, ekran görüntüsündeki monokrom kimliği korurken tüm metin ve etkileşimli kontrol sınırları için WCAG 2.1 kontrast standartlarını sayısal olarak doğrular2:
+
+
+
+
+
+
+CSS
+:root {
+ /* Alper's Works — Yüzeyler (Web Sitesi Ekran Görüntüsüyle Uyumlu) */
+ --aw-bg-app: #FFFFFF;          /* Ana üst çubuk ve saf beyaz stüdyo */
+ --aw-bg-sidebar: #FAFAFA;      /* Kontrol paneli kırık beyaz yüzeyi */
+ --aw-bg-subtle: #F4F4F5;       /* Sekme yuvası, preset kartı, hover */
+ --aw-bg-canvas-stage: #F0F0F2; /* Tuval dış çevresi (stüdyo masası) */
+
+ /* Alper's Works — Mürekkep ve Tipografi Hiyerarşisi */
+ --aw-ink-primary: #1A1A1A;     /* Birincil metin, aktif CTA buton (17.40:1 AAA) */
+ --aw-ink-brand: #2D2D2D;       /* Logo ve büyük başlık antrasiti (13.77:1 AAA) */
+ --aw-ink-secondary: #595959;   /* Kontrol etiketleri (7.00:1 AAA / 6.71:1 AA) */
+ --aw-ink-muted: #737373;       /* Birimler, ipuçları, ikincil meta (4.74:1 AA) */
+
+ /* Yapısal ve Etkileşimli Kenarlıklar */
+ --aw-border-subtle: #E4E4E7;   /* Yalnızca dekoratif panel ayırıcıları */
+ --aw-border-control: #94949C;  /* Input, select, checkbox sınırı (3.01:1 WCAG UI) */
+ --aw-border-focus: #1A1A1A;    /* Klavye odak (focus-visible) halkası */
+
+ /* Mühendislik Telemetrisi (Sadece OAR & Köprü Durumu — Tümü AA >= 4.5:1) */
+ --aw-status-ok: #15803D;       /* Optimal OAR / güvenli köprü (5.02:1 AA) */
+ --aw-status-warn: #B45309;     /* İnce köprü / yüksek OAR uyarısı (5.02:1 AA) */
+ --aw-status-error: #B91C1C;    /* Çakışma / kritik hata (6.47:1 AA) */
+}
+
+  
+
+Tipografi Seçimi ve Açık Arayüzde Tuval Önizleme Modları
+Ekran görüntüsündeki tipografik kimliği açık kaynaklı Google Fonts ekosisteminde yakalarken, Türkçe arayüzdeki ğ, ş, ı, İ, ö, ü, ç harflerinin bozulmadan görünmesi için latin-ext alt kümesinin yüklenmesi gereklidir44. Aşağıdaki üçlü yazı tipi sistemi hem ALPER'S WORKS markasıyla görsel eşleşmeyi hem de parametrik verilerin yüksek okunurluğunu sağlar:
+
+
+Kullanım Katmanı
+	Önerilen Yazı Tipi
+	Lisans
+	Teknik ve Görsel Gerekçe
+	Marka Logosu ve Bölüm Başlıkları
+	Jost (Variable, 400–700)
+	SIL OFL 1.1
+	Paul Renner’ın Futura çizgisinden esinlenen geometrik sans-serif; ekran görüntüsündeki dairesel O ve keskin büyük harf karakterine en yakın açık kaynaklı karşılıktır. Google Fonts üzerinden latin-ext ile Türkçe aksanlı harfleri destekler41.
+	Arayüz Etiketleri ve Gövde Metni
+	Plus Jakarta Sans (Variable, 400–600)
+	SIL OFL 1.1
+	Geometrik kökünü korurken yükseltilmiş x-yüksekliği, bilinçli büyütülmüş diakritikleri ve tam Türkçe karakter desteğiyle 11–13 px etiketlerde yoğun okunurluk sunar; aşırı yaygınlaşan Montserrat’a kıyasla daha özgün bir ürün hissi verir48.
+	Mühendislik Sayıları ve Telemetri
+	JetBrains Mono (tabular-nums)
+	SIL OFL 1.1
+	1400 × 600 mm, %38,1 OAR ve 5,35 mm gibi anlık değişen ölçümlerde rakam genişliklerini sabitleyerek kaydırıcı hareketinde metin kaymasını önler53.
+	Saf beyaz bir arayüzün içinde perforasyonun optik okunurluğu, kullanıcının o an ne tasarladığına bağlıdır: grafik bir poster beyaz zeminde koyu delikler gerektirirken, bir otomotiv hoparlör ızgarası koyu veya metalik sac üzerinde değerlendirilmelidir. Bu nedenle uygulama çerçevesi her zaman Alper's Works’ün imza beyaz kimliğinde kalmalı, ancak tuvalin (viewport) iç yüzey simülasyonu tek tıkla dört stüdyo modu arasında değiştirilebilmelidir:
+
+
+Tuval Önizleme Modu
+	Yüzey ve Perforasyon Görünümü
+	İdeal Kullanım Senaryosu
+	Architectural Light (Varsayılan)
+	Açık nötr stüdyo masası (#F0F0F2) üzerinde saf beyaz panel (#FFFFFF) ve keskin antrasit (#1A1A1A) delikler
+	Web sitesiyle bütünleşik açılış görünümü, grafik tasarım ve mimari sunumlar
+	Acoustic Dark
+	Mat antrasit panel (#141518) üzerinde açık tonlu delikler
+	Otomotiv kokpit ve hoparlör ızgarası derinlik kontrolü1
+	Brushed Metal
+	Fırçalanmış alüminyum gradyanı (#D6D9DE → #BCC1C8) üzerinde derin siyah (#101113) arka akustik kumaş görünümü
+	Sac metal, alüminyum ve CNC parça önizlemesi
+	CAD / Laser Wireframe
+	Beyaz teknik çizim zemini üzerinde dolgusuz kırmızı (#D93025) delik kesim konturları ve mavi (#1A73E8) panel çerçevesi
+	LightBurn, Epilog ve CNC kesim öncesi son kontur doğrulaması7
+	Simple ve Advanced Modlu Kullanıcı Deneyimi Mimarisi
+Kademeli Gösterim ve Tekil Durum İlkesi
+Parametrik tasarım araçlarında yeni kullanıcıların ilk saniyede uygulamadan ayrılmasının başlıca nedeni, tek bir ekranda yirmiye yakın mühendislik parametresi ve teknik jargonla karşılaşmalarıdır1. Kademeli gösterim (progressive disclosure) ilkesi, temel yaratıcı kontrolleri ön yüze taşıyarak öğrenme eşiğini düşürür ve uzmanlık gerektiren ayarları ikincil bir katmana aktarır8.
+Yaratıcı yazılımlarda bu desenin başarısı tekil durum kaynağı (Single Source of Truth) disiplinini korumaya bağlıdır; yanlış ayrıştırılmış modlar kullanıcının yaptığı ince ayarları kaybetmesine yol açabilir58. Alper's Works Pattern Generator’da Simple ve Advanced iki farklı motor değil, aynı parametrik durum nesnesinin iki ayrı görünümü olmalıdır. Bir kullanıcı Advanced modunda kerf = 0,20 mm veya edgeSpacingRatio = 0,55 ayarlayıp Simple görünümüne döndüğünde bu parametreler sıfırlanmamalı; yalnızca üst çubuktaki Advanced sekmesinin yanında ince bir nokta (Advanced •) gösterilerek arka planda özel mühendislik değerlerinin etkin olduğu bildirilmelidir.
+  
+
+Simple ve Advanced Mod Kontrol Dağılımı
+Aşağıdaki görev temelli dağılım, Simple modunda teknik terminolojiye boğulmadan hızlı görsel üretim sağlarken, Advanced modunda mevcut prototipin tüm mühendislik yeteneklerini koruyup CAD/CNC üretim araçlarıyla genişletir1:
+
+
+Kontrol Grubu
+	Simple Modu (Hızlı Yaratım)
+	Advanced Modu (Mühendislik & CAD)
+	Kullanıcı Dili (TR / EN)
+	Başlangıç & İlham
+	6 görsel Hazır Preset Kartı + Zar (Rastgeleleştir)
+	Preset JSON İçe/Dışa Aktarma + Tohum (Seed) ve Jitter5
+	Şablonlar / Presets
+	Panel Ebatı & Sınır
+	Hazır Oranlar (16:9, 1:1, A4, Otomotiv Kapı, Dairesel)
+	Kesin Genişlik, Yükseklik, Çap, Köşe Radyusu (mm) + Kenar Payı (Margin) + Kenar Kırpma Modu (Merkez / Tam Delik / Sınırda Kırp)7
+	Panel ve Kenar Payı
+	Motif & Şekil
+	İkonlu seçici (5 Otomotiv + Daire, Altıgen, Kare, Yıldız) + SVG Yükle
+	Pivot Noktası (Sol / Merkez / Sağ), Açı Yönlendirmesi (Akış / Sabit / Işınsal), Temel Açı (0°–360°), Kerf Telafisi (0–1 mm)1
+	Motif ve Kesim Payı
+	Topoloji & Yoğunluk
+	Görsel topoloji seçici + 3 Sade Kaydırıcı (Yoğunluk, Boyut, Odak Yayılımı)
+	Kesin Merkez Hatve (mm), Çekirdek Ölçeği, Geçiş Yarıçapı (mm), Dış Bölge Sıkıştırma (edgeSpacingRatio), Devamlılık Modu ve Zemin Mikro-Dokusu (ambientScale)1
+	Desen Akışı ve Yoğunluk
+	Odak & Modülasyon
+	Tuvalde tek sürüklenebilir odak halkası
+	Çoklu Çekici Nokta/Çizgi Ekleme (her biri için yarıçap ve ağırlık) + Görsel Parlaklık Haritası (Halftone: Fotoğraf Yükle, Invert, Contrast)6
+	Odak ve Görüntü Haritası
+	Görünüm & Renk
+	4 Stüdyo Modu + Panel/Delik Rengi + Dolgu/Kontur geçişi
+	Kontur kalınlığı (mm), Arka plan referans görsel opaklığı, Çakışma/İnce Köprü Vurgu Katmanı
+	Görünüm ve Malzeme
+	Telemetri & Dışa Aktarma
+	Alt şeritte kompakt OAR % + Tek tıkla SVG, PNG (2x), CSS, DXF
+	Odak OAR % + Panel OAR % + Min. Köprü (mm) + Delik Sayısı + Hedef Sac Kalınlığı uyarısı + Lazer SVG + Katmanlı DXF7
+	Üretim Doğrulama ve Çıktı
+	Doğrudan Tuval Etkileşimleri ve Duyarlı Düzen
+Modern parametrik tasarım araçlarında kullanıcılar, kenar çubuğunda koordinat aramak yerine doğrudan tuval üzerinde kontrolcüleri sürükleyerek anlık görsel geri bildirim almayı tercih eder6. Bu akıcılığı kazandırmak için tuvalde imleç merkezli yakınlaştırma (%10–%1000 fare tekerleği), Space + Sürükle veya orta tuşla kaydırma (pan), F kısayoluyla ekrana sığdırma ve 0 tuşuyla 1:1 ölçekleme standart olmalıdır. Eski koddaki yüzde tabanlı focusX ve focusY kaydırıcıları yerine tuval üzerinde doğrudan sürüklenen ince bir odak nişangahı yer almalı; Shift tuşuna basılı tutulduğunda odak panel merkez eksenlerine kilitlenmeli, Advanced modunda ise tuvale çift tıklayarak yeni çekici noktaları (örneğin çok sürücülü bir hoparlör düzeni için) eklenebilmelidir6.
+Tuval altındaki yüzen minimalist telemetri çubuğu, milimetrik ızgara/cetvel katmanını, kenar payı güvenli çizgisini ve çakışan deliklerin kırmızı vurgusunu tek tıkla açıp kapatmaya imkân tanımalıdır. Ayrıca mevcut koddaki sabit 420 px kenar çubuğu ve overflow: hidden kuralı mobil ve tablet ekranlarda arayüzü kullanılamaz hâle getirdiği için1, dar ekranlarda tuval üstte sabitlenip kontroller altta kaydırılabilir çekmeceye dönüştürülmeli; çok küçük telefon ekranlarında ise SolidVents örneğinde olduğu gibi masaüstü çalışmasına hızlı geçiş için bağlantı paylaşım/kopyalama kolaylığı sunulmalıdır6.
+Eksik Özelliklerin ve Teknik İyileştirmelerin Uygulanma Mimarisi
+Doğru Geometri ve Üretim Güvenliği (DFM) Algoritmaları
+Mevcut koddaki mühendislik sapmalarını ortadan kaldırmak için beş temel geometrik doğrulama mekanizması arayüzden bağımsız çekirdek motorun (src/engine/) parçası hâline getirilmelidir.
+Kesin Shoelace OAR ve Sınır Kırpma Hesabı: Her motif seçildiğinde veya özel SVG yüklendiğinde, birim ölçekteki (s = 1) net delik alanı işaretli Shoelace (Gauss alan) formülüyle bir kez hesaplanır2:
+  
+
+Burada m = 1…M, bileşik bir yolun tüm kapalı alt döngülerini temsil eder; dış kontur pozitif, zıt sarımlı iç boşluk negatif alan ürettiğinden örneğin 20 × 20 mm kare içindeki 10 × 10 mm delik tam olarak 400 − 100 = 300 mm² net alan verir2. Yerleştirilen her j örneğinin gerçek alanı A_unit × s_j² olarak toplanır. Odak bölgesi OAR’ında payda tam daire (πR²) yerine odak dairesinin panel dikdörtgeniyle gerçek kesişim alanı alınarak kenar yakınındaki %12,4’lük sapma giderilir ve endüstriyel teknik resim standartlarına uygun biçimde hem Odak Bölgesi OAR’ı hem de Tüm Panel OAR’ı birlikte raporlanır2.
+Akustik şeffaflık eşiklerinin arayüzde doğru kalibre edilmesi için sektör rehberleri ile akademik bulgular birlikte değerlendirilmelidir. Tüketici ses donanımı ve perforasyon üreticisi rehberleri, hoparlör üzerinde %25’in altındaki açık alanın duyulabilir yüksek frekans kaybı ve ses renklenmesi yarattığını, %30–%40 bandının tüketici ızgaraları için yaygın hedef olduğunu ve %40 üzerinin hi-fi/stüdyo uygulamalarında akustik olarak şeffaf güvenli bölge kabul edildiğini belirtir15. Öte yandan metal ızgara üreticileri ve otomotiv akustik çalışmaları (İTÜ araştırması %50 ve üzerini, metal ızgara rehberleri ~%60’ı, AES otomotiv hoparlör ızgarası modelleme çalışması ise %67 açık alanlı üçgen düzeni örnekler) daha yüksek şeffaflık gerektiren profesyonel ve otomotiv uygulamalarında %50–%67 aralığına çıkıldığını, ayrıca dar tüp etkisini önlemek için delik çapının mümkünse malzeme kalınlığından büyük (d ≥ t) tutulması gerektiğini vurgular15. Bu nedenle arayüzdeki OAR telemetri rozeti sabit bir "tek doğru" yerine kademeli rehber bantları (< %25, %30–%40, %40–%55, %55+) ve malzeme kalınlığı uyarısıyla sunulmalıdır.
+Uzamsal Karma (Spatial Hash) ile Gerçek Zamanlı Köprü Kalınlığı Denetimi: Perforasyonlu saclarda yapısal dayanımı yöneten temel ölçü, komşu iki delik arasındaki en dar köprü (et/ligament) kalınlığıdır; zımba (punching) üretiminde köprü genişliğinin genel kural olarak en az malzeme kalınlığına eşit olması (B ≥ t) beklenir15. N = 2.500 delikli bir panelde her deliği diğerleriyle karşılaştırmak 3.123.750 çift testi (O(N²)) gerektirirken, hücre kenarı c = 2 × r_max seçilen bir Tekdüze Uzamsal Karma (Uniform Spatial Hash) ızgarası yalnızca 9 komşu hücreyi kontrol ederek çift sayısını 54.100’e (57,7× hızlanma) indirir2. Çevreleyici çember ön elemesi ardından yalnızca yakın komşularda kesin köşe-kenar mesafesi ve SAT (Separating Axis Theorem) çakışma testi çalıştırılarak minimum köprü kalınlığı canlı raporlanır ve çakışan delikler tuvalde kırmızı vurgulanır.
+Evrensel SVG Ayrıştırıcı, Kerf Telafisi ve Spiral Kapsama Düzeltmesi: Özel SVG yükleyicisi yalnızca <path> okumak yerine <rect>, <circle>, <ellipse>, <polygon> ve <polyline> elemanlarının tümünü kapalı döngülere çevirmeli; her M/m alt yolunu bağımsız örnekleyerek düz L segmentlerini gereksiz bölmeden yalnızca Bézier/Arc eğrilerini düzleştirmeli ve evenodd / sarım kurallarıyla içi boş logoları sahte kesim çizgisi olmadan korumalıdır16. Güvenlik açısından yüklenen tüm kullanıcı SVG’leri <script>, on* olay nitelikleri, <foreignObject> ve harici bağlantılardan arındırılmalıdır21. Lazer kesim için Advanced moduna eklenen Kerf Telafisi (0,00–1,00 mm) her delik konturunu yarım kerf (kerf / 2) kadar içe ofsetleyerek ışın yanma payını dengeler; üretici referanslarına göre 3 mm MDF için 0,15–0,25 mm ve akrilik için 0,10–0,20 mm başlangıç rehberi sunulur7. Son olarak, Fibonacci spiralindeki 1600 noktalık sabit tavan kaldırılarak panelin en uzak köşesini dolduracak nokta sayısı dinamik hesaplanır1.
+Mühendislik Doğrulamalı 6 Hazır Preset: Mevcut prototipin varsayılan ayarındaki 0,73 mm köprü kalınlığı riskini ortadan kaldırmak için2, hem açılış durumu hem de Simple modunun Preset kartları için kesin Shoelace OAR ve komşu poligon mesafesi doğrulanmış altı hazır şablon hazırlanmıştır2:
+
+
+Hazır Preset Adı
+	Motif & Topoloji
+	Hatve (mm)
+	Merkez Ölçeği
+	Temel Açı
+	Kesin Merkez OAR
+	Min. Köprü Kalınlığı
+	İdeal Kullanım Alanı
+	1. Luxury Door Panel
+	30° Pahlı Slot · Heksagonal
+	34
+	1,20
+	30°
+	%38,1
+	5,35 mm
+	Otomotiv kapı paneli hoparlör ızgarası2
+	2. Burmester Acoustic
+	Akustik Kapsül · Heksagonal
+	28
+	1,00
+	30°
+	%30,9
+	8,66 mm
+	Yüksek dayanımlı alüminyum ızgara2
+	3. Hi-Fi Studio Mesh
+	Altıgen Delik · Heksagonal
+	24
+	1,00
+	0°
+	%52,1
+	6,68 mm
+	Stüdyo monitörü, maksimum şeffaflık2
+	4. Minimal Swiss Dot
+	Daire · Heksagonal
+	26
+	0,95
+	0°
+	%48,1
+	7,00 mm
+	Alper's Works imza grafik & cephe2
+	5. Automotive G-Matrix
+	30° Baklava · Heksagonal
+	34
+	1,05
+	0°
+	%29,7
+	2,50 mm
+	Lüks konsol ve mimari dekoratif panel2
+	6. Aero Chevron Flow
+	30° Chevron · Heksagonal/Dalgalı
+	34
+	1,15
+	30°
+	%24,6
+	8,83 mm
+	Havalandırma ve aerodinamik trim2
+	  
+
+Hibrit 60 FPS Render Motoru ve Çoklu Dışa Aktarma Boru Hattı
+On binlerce deliği etkileşimli biçimde düzenlerken aynı zamanda 1:1 mikron hassasiyetinde CAD çıktısı üretmenin en sağlıklı yolu, ekran çizimini vektör dışa aktarımından tamamen ayırmaktır11. Ekrandaki canlı önizleme için SVG DOM yerine HTML5 Canvas 2D + Path2D + HiDPI (window.devicePixelRatio) kullanılmalıdır22. Seçilen motif bellekte tek bir normalize Path2D nesnesinde önbelleğe alınır; geometri motoru DOM’dan bağımsız ham sayısal dönüşüm listeleri (x, y, angle, scale, isColliding) üretir ve Canvas 2D yalnızca görünür alandaki (viewport culling) şekilleri ctx.setTransform(...) + ctx.fill(cachedPath) ile çizer22. Tarayıcı grafik kıyaslamaları, bu yaklaşımla 10.000’in üzerinde nesnenin yüksek kare hızlarında (60 FPS hedefinde) akıcı biçimde işlenebildiğini ve Retina ekranlarda devicePixelRatio ölçeklemesiyle keskinliğini koruduğunu göstermektedir11.
+  
+
+Dışa aktarma boru hattı, her kullanıcı profilinin yazılım standardına doğrudan uyum sağlamalıdır. CAD DXF tarafında, AutoCAD 2000 (AC1015) LWPOLYLINE yapısını ham metin birleştirmeyle elle yazmak, eksik HANDSEED değeri, varlık tutamaçları (kod 5) veya 100 alt sınıf işaretçileri (AcDbEntity, AcDbPolyline) nedeniyle AutoCAD’de açılma hatalarına yol açmaktadır70. Bu yüzden modüler projede aktif sürdürülen, MIT lisanslı TypeScript paketi @tarikjabiri/dxf (v2.10.0) tercih edilmeli26; dosya başlığında hem $INSUNITS = 4 (milimetre) hem $MEASUREMENT = 1 (metrik) birlikte tanımlanmalı10; çıktı HOLES, PANEL_OUTLINE ve isteğe bağlı ALIGNMENT_MARKS katmanlarına ayrılmalı7 ve çok eski CNC tezgahları için ikincil bir R12 (AC1009) uyumluluk anahtarı sunulmalıdır75.
+SVG çıktısı mutlaka iki ayrı profille sunulmalıdır; çünkü LightBurn gibi lazer yazılımları SVG’deki dolgu rengini kesim katmanı rengine dönüştürürken76, Epilog/Trotec/Universal sürücüleri dolgusuz ince saç çizgisi (~0,025 mm) bekler ve MeshBox benzeri lazer araçları kırmızı 0,1 mm kontur geleneğini izler7. Bu nedenle Grafik/Illustrator SVG (seçili dolgu/kontur renkleri, 1:1 mm boyutları ve şeffaf arka plan seçeneği) ile Lazer Kesim SVG (dolgusuz, delikler kırmızı #FF0000, panel çerçevesi mavi #0000FF kapalı konturlar) ayrı indirme seçenekleri olmalıdır7.
+Web ve paylaşım çıktıları için yüksek çözünürlüklü PNG ve WebP (1x, 2x, 4x), tarayıcıların maksimum tuval piksel sınırını aşarak sessizce boş görüntü üretmesini engelleyen boyut korumasıyla birlikte canvas.toBlob() üzerinden sunulur79. CSS background-image kopyalama özelliği, Base64 kodlamasının getirdiği yaklaşık %33 boyut artışından kaçınmak için # → %23 dönüştürmeli URL-kodlu Data URI üretir (Base64’e kıyasla %20–%30 daha küçük ve okunabilir); ancak binlerce delikli çok yoğun panellerde CSS dosyasını şişirmemek için harici .svg indirmesi önerilir21. Paylaşılabilir bağlantı özelliği tüm ayarları lz-string (compressToEncodedURIComponent) ile URL #s=... parçasına sıkıştırır83; rastgelelik içeren modlarda Math.random() yerine 32-bit deterministik Mulberry32 PRNG kullanılması sayesinde aynı link her cihazda birebir aynı geometriyi yeniden üretir5.
+Son olarak, SolidVents ve HoleSnap’te yer alan 3D STEP (.stp) dışa aktarması tarayıcıda opencascade.js, replicad veya brepjs ile teknik olarak mümkündür6; ancak tam OpenCascade WASM çekirdeği 48,9 MB (sıkıştırılmış ~9,1 MB), özelleştirilmiş derlemeler dahi 2,4–22 MB aralığındadır ve WASM derleme süresi ile bellek tüketimi yüksektir39. Bu nedenle ilk yayın olan v2.0 çekirdeği hızlı açılış için hafif tutulmalı, 3D STEP özelliği yalnızca kullanıcı ilgili butona bastığında bir Web Worker içinde tembel yüklenen (lazy-loaded) opsiyonel v2.1 modülü olarak planlanmalıdır40.
+Ön Yüz Teknoloji Yığını Karşılaştırması
+Açık kaynaklı bir tasarım aracının topluluk katkısı (Pull Request) alabilmesi ve uzun vadede sürdürülebilmesi için mevcut tek HTML dosyası yaklaşımı ile modern modüler Vite mimarisi arasındaki ödünleşimler net biçimde görülmelidir.
+
+
+Mimari Kriteri
+	Modüler Vite + TypeScript + Tailwind CSS v4 (Önerilen)
+	Tek Bağımsız HTML Dosyası (Mevcut Yaklaşım)
+	Açık Kaynak Katkı ve Bakım
+	Geometri motoru (engine/), ihracatçılar (exporters/), presetler (presets/) ve arayüz (ui/) ayrıştırılmıştır; topluluk kolayca yeni motif/topoloji ekleyebilir90.
+	Kod büyüdükçe birleştirme çakışmaları (merge conflict) ve bakım maliyeti hızla artar.
+	Tip Güvenliği ve Test
+	TypeScript + Vitest ile Shoelace OAR, Spatial Hash köprü mesafesi ve DXF çıktısı her commit’te otomatik doğrulanır12.
+	Çalışma zamanı hataları doğrudan kullanıcı tarayıcısında oluşur; otomatik test kurmak zordur.
+	Paket Ekosistemi
+	@tarikjabiri/dxf ve lz-string gibi olgun paketler ağaç kırpmayla (tree-shaking) güvenle dahil edilir12.
+	Harici CDN bağımlılığı veya elle yazılan kırılgan kütüphane taklitleri gerekir.
+	Derleme ve Vercel Hızı
+	Native ESM geliştirme ve hızlı üretim derlemesi (2026 çıkışlı Vite 8’de Rust tabanlı Oxc/Rolldown ile ICS projelerinde %70’in üzerinde derleme hızlanması raporlanmıştır)12; Vercel’e sıfır ayar ile bağlanır94.
+	Derleme adımı gerektirmez; doğrudan statik sunulur.
+	Çevrimdışı Tek Dosya Dağıtımı
+	vite-plugin-singlefile ile GitHub Releases sekmesine tek dosyalık çevrimdışı sürüm de ek olarak derlenebilir.
+	Doğal olarak tek dosyadır.
+	En dengeli karar, çekirdek geometri motorunu (src/engine/) herhangi bir arayüz kütüphanesine bağlamadan saf TypeScript olarak yazıp, arayüzü Vite + TypeScript + Tailwind CSS v4 (React veya hafif Vanilla TS/Preact) üzerinde kurmaktır12. Böylece hem modern açık kaynak geliştirme standartlarına uyulur hem de isteyen kullanıcılar için GitHub Releases altında çevrimdışı çalışan tek HTML sürümü otomatik yayımlanabilir.
+GitHub Açık Kaynak ve Vercel Canlı Yayınlama Rehberi
+Açık Kaynak Lisansı ve Ticari Çıktı Güvencesi
+JavaScript/TypeScript ekosistemindeki açık kaynak tasarım araçları ve portföy projeleri için en yüksek benimsenmeyi sağlayan standart tercih MIT Lisansıdır4; kısa ve hukuki sürtünmesi düşük metni sayesinde hem bireysel tasarımcılar hem de şirket içi mühendisler aracı çekinmeden kullanır13. İleride algoritmalar üzerinde açık patent izni ve patent misilleme (patent retaliation) koruması istenirse Apache 2.0 tercih edilebilir13.
+Depodaki LICENSE dosyasına ek olarak README.md içinde şu ticari özgürlük notu açıkça belirtilmelidir: "Uygulamanın kaynak kodu MIT lisanslıdır; bu araçla ürettiğiniz tüm desenler, SVG, DXF, PNG ve CSS çıktıları tamamen size aittir ve atıf zorunluluğu olmadan ticari ürünlerde, müşteri işlerinde ve fiziksel üretimde serbestçe kullanılabilir." Benzer tarayıcı içi araçlarda kullanıcıların en sık doğruladığı konu çıktıların ticari lisans durumudur5.
+GitHub Depo Mimarisi, Dokümantasyon ve Çift Dil (TR/EN)
+Küresel GitHub ve tasarım topluluklarına erişmek için depo dokümantasyonu varsayılan olarak İngilizce hazırlanmalı; uygulama arayüzü ise src/i18n/en.json ve src/i18n/tr.json sözlükleriyle sıfır harici kütüphane yüküyle çift dilli (TR/EN) çalışmalıdır. Açılışta tarayıcının navigator.language bilgisi tr ise Türkçe, diğer durumlarda İngilizce başlamalı ve üst çubuktan tek tıkla değiştirilebilmelidir.
+
+
+Dizin / Dosya
+	Sorumluluk Alanı
+	src/engine/
+	Saf TypeScript geometri çekirdeği (topolojiler, warpPoint, shoelace.ts, spatialHash.ts, kerf.ts, imageMap.ts, mulberry32.ts)
+	src/motifs/
+	Yerleşik otomotiv/geometrik motifler ve arındırılmış evrensel svgParser.ts
+	src/exporters/
+	dxfExporter.ts, svgExporter.ts (Grafik + Lazer), rasterExporter.ts, cssExporter.ts, urlState.ts
+	src/presets/
+	Mühendislik doğrulamalı 6 hazır JSON preset (topluluk PR’larına açık)
+	src/renderer/
+	HiDPI Canvas2DRenderer.ts ve etkileşimli Pan/Zoom/Attractor kontrolcüsü
+	src/ui/ & src/i18n/
+	Alper's Works tasarım sistemi bileşenleri, SimplePanel, AdvancedPanel, tr.json, en.json
+	tests/ & .github/workflows/
+	Vitest geometri/OAR/DXF doğrulama testleri ve otomatik GitHub Actions CI
+	docs/ & public/
+	CAD-IMPORT-GUIDE.md (Rhino INSUNITS, AutoCAD DXFIN/UNITS, SolidWorks Sketch, LightBurn katman eşleştirme54), CONTRIBUTING.md, og-image.png
+	README.md sayfası yukarıdan aşağıya şu akışla kurgulanmalıdır: Alper's Works başlığı, canlı Vercel Demo rozeti ve 1200 × 630 yüksek çözünürlüklü arayüz görseli; projenin grafik ve CAD dünyasını nasıl birleştirdiğinin kısa özeti; Simple/Advanced yetenek tablosu; npm install && npm run dev ile iki satırda yerel çalıştırma; CAD ve lazer yazılımlarına aktarım rehberi bağlantısı; yeni motif veya preset ekleme adımları ve MIT lisans bilgisi.
+Vercel Dağıtım Yapılandırması, Open Graph ve Analitik
+Vercel’in ücretsiz Hobby planı (2026 resmi dokümantasyonuna göre aylık 100 GB Fast Data Transfer, günde 100 dağıtım, 100 MB CLI yükleme, otomatik HTTPS/SSL ve her GitHub PR’ı için canlı Preview URL) tamamen istemci taraflı çalışan bu proje için fazlasıyla yeterlidir98. Ancak Next.js projelerinden farklı olarak Vercel, Vite çıktısındaki /assets/* dosyalarına otomatik immutable önbellek başlığı atamaz ve SPA rotalarını yeniden yazmaz94. Bu nedenle proje köküne aşağıdaki vercel.json yapılandırması eklenmelidir94:
+
+
+
+
+
+
+JSON
+{
+ "$schema": "https://openapi.vercel.sh/vercel.json",
+ "rewrites": [
+   { "source": "/(.*)", "destination": "/index.html" }
+ ],
+ "headers": [
+   {
+     "source": "/assets/(.*)",
+     "headers": [
+       { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+     ]
+   },
+   {
+     "source": "/(.*)",
+     "headers": [
+       { "key": "X-Content-Type-Options", "value": "nosniff" },
+       { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+       { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
+       { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://alpersworks.com" }
+     ]
+   }
+ ]
+}
+
+Buradaki frame-ancestors kuralı pratik bir avantaj sağlar: klasik X-Frame-Options: DENY başlığı yerine kendi web sitenin alan adına izin veren Content-Security-Policy başlığını kullandığında, güvenliği korurken dilersen ALPER'S WORKS portföy sitendeki Projects sayfasına canlı aracı etkileşimli olarak gömebilirsin101.
+Sosyal medya ve mesajlaşma uygulamalarında paylaşıldığında kurumsal bütünlüğü korumak için public/og-image.png konumuna standart 1200 × 630 piksel (1,91:1) statik PNG kartı yerleştirilmeli ve index.html içinde tam mutlak URL (https://pattern.alpersworks.com/og-image.png) ile og:title, og:description, og:image ve twitter:card etiketleri tanımlanmalıdır103. Kart tasarımı beyaz zemin üzerinde koyu antrasit ALPER'S WORKS / PATTERN GENERATOR tipografisi ile sağ tarafta keskin bir perforasyon kesitini birleştirmeli; canlıya alındıktan sonra Vercel panelindeki yerleşik Open Graph Preview aracından doğrulanmalıdır106.
+Çerez onay bandı (cookie banner) göstermeden kullanıcı etkileşimini ölçmek için 2026 itibarıyla çerezsiz (cookieless) üç önde gelen seçenek öne çıkmaktadır:
+
+
+Analitik Aracı
+	2026 Ücretsiz Katman ve Kaynak Notu
+	Kurulum ve Lisans
+	Özel Olay (Export) Takibi
+	Öneri Durumu
+	Vercel Web Analytics
+	Resmi Vercel dokümantasyonuna göre Hobby planda aylık 50.000 olay ücretsiz (1 ay raporlama; limit aşımında fatura çıkmaz, 3 gün tolerans sonrası duraklatılır)107. (Bazı eski üçüncü taraf bloglar 2.500/ay limitini anmaktadır110.)
+	Tek paket + sıfır ayar; çerezsiz, Vercel paneliyle bütünleşik; ayrıca 10.000 olay / 30 gün ücretsiz Speed Insights109.
+	Temel trafik ve performans metrikleri
+	En Hızlı Başlangıç: Ek hesap açmadan ilk gün kurulum110.
+	Umami Cloud
+	Üçüncü taraf 2026 kaynakları ücretsiz bulut katmanını 100.000 ile 1.000.000 olay/ay aralığında raporlamaktadır (güncel kota resmi fiyat sayfasından teyit edilmelidir); self-host tamamen ücretsizdir113.
+	MIT Açık Kaynak, ~2 KB betik, çerezsiz113.
+	export_dxf, export_svg, mode_advanced gibi özel buton olayları113
+	En İyi Ürün İçgörüsü: Hangi dışa aktarma formatı ve presetin sevildiğini görmek için ideal.
+	Plausible Analytics
+	Yönetilen bulutta ücretsiz katman yoktur (10K sayfa görüntüleme için $9/ay başlangıç); self-host ücretsizdir ancak PostgreSQL + ClickHouse (~2 GB RAM) gerekir114.
+	AGPL Açık Kaynak, ~1 KB betik, çerezsiz113.
+	Güçlü hedef ve huni takibi114
+	Ücretsiz açık kaynak portföy projesi için maliyeti ve barındırma yükü gereksiz yüksek.
+	Uygulama ve Yayınlama Kontrol Listesi
+Mevcut tek dosyalık prototipten Alper's Works Pattern Generator v2.0 canlı açık kaynak sürümüne geçiş için izlenecek sıralı uygulama adımları şunlardır:
+1. Modüler Depoyu Başlat: Vite + TypeScript şablonuyla projeyi oluştur; @tailwindcss/vite, @tarikjabiri/dxf ve lz-string bağımlılıklarını ekle12.
+2. Saf Geometri Motorunu Kur ve Hataları Kapat: Sekiz topolojiyi ve warpPoint algoritmasını src/engine/ dizinine taşı; Shoelace OAR, sınır-kırpılmış odak alanı, Spatial Hash köprü denetimi, kerf telafisi, dinamik Fibonacci spiral sınırı, Mulberry32 PRNG ve arındırılmış evrensel SVG ayrıştırıcıyı uygula ve Vitest ile test et2.
+3. Canvas 2D HiDPI Tuvalini ve Doğrudan Etkileşimleri Bağla: Path2D önbellekli canlı çiziciyi, imleç merkezli Zoom/Pan kontrollerini, sürüklenebilir çoklu çekicileri, dört stüdyo önizleme modunu ve görsel parlaklık (Halftone) haritasını entegre et6.
+4. Alper's Works Kimliğini ve Simple/Advanced Modlarını Uygula: WCAG 2.1 doğrulanmış beyaz/antrasit CSS tokenlarını, Jost + Plus Jakarta Sans + JetBrains Mono tipografisini, doğrulanmış altı hazır preseti, tekil durum paylaşımlı Simple / Advanced geçişini ve TR / EN dil anahtarını tamamla2.
+5. Üretim Çıktılarını Hedef Yazılımlarda Doğrula: Üretilen DXF dosyasını AutoCAD, Rhino veya LibreCAD’de 1:1 mm ölçerek; Lazer SVG’yi LightBurn’de renk-katman eşleştirmesiyle; Grafik SVG’yi Illustrator/Figma’da; paylaşılan URL bağlantısını gizli tarayıcı sekmesinde test et54.
+6. GitHub ve Vercel Üzerinden Canlıya Al: MIT LICENSE, README.md, docs/CAD-IMPORT-GUIDE.md, vercel.json, 1200 × 630 public/og-image.png kartı ve Vercel Web Analytics (veya Umami) kurulumunu tamamlayıp Vercel alt alan adını (pattern.alpersworks.com gibi) web sitendeki Projects sekmesine bağla13.
+Alıntılanan çalışmalar
+1. gemini-code-1789374884217.html
+2. unknown_url
+3. Haikei: Generate unique SVG design assets, https://haikei.app/
+4. Pattern Monster - SVG Pattern Generator, https://pattern.monster/
+5. Free SVG Patterns Generator — Custom Colours | ThemeXpert, https://www.themexpert.com/tools/svg-pattern-generator/
+6. SolidVents | Parametric Pattern Generator — STEP, DXF & SVG, https://solidvents.com/en/
+7. Free Lattice Pattern Generator for Laser Cutting | SVG Patterns, https://meshbox.dev/en/
+8. Progressive Disclosure: UX Design Explained for Easier Navigation, https://emergent.sh/glossary/progressive-disclosure
+9. Progressive Disclosure in UX: When to Hide, Reveal & Test, https://www.orbix.studio/blogs/progressive-disclosure-in-ux
+10. Rhino exports .DXF files with units always set to Imperial, https://discourse.mcneel.com/t/rhino-exports-dxf-files-with-units-always-set-to-imperial/77475
+11. SVG vs Canvas vs WebGL: Which Should You Use? (2026, https://www.svggenie.com/blog/svg-vs-canvas-vs-webgl-performance-2025
+12. Vite guide - HTML, TypeScript, React, Vue, and Tailwind CSS, https://ics.media/en/entry/210708/
+13. MIT, Apache 2.0, or GPL? Stop Guessing — Pick the Right ... - Medium, https://medium.com/@rakibul.h.rabbi/mit-apache-2-0-or-gpl-stop-guessing-pick-the-right-open-source-license-in-5-minutes-20675f513ebe
+14. Speaker Grille Design Guide: Materials, Open Area & Acoustic, https://tmnetch.com/custom-speaker-grills-design-tips-challenges-concerns/
+15. Speaker Grille Hole Pattern Design: Open Area, Hole Size & Layout, https://solidvents.com/guides/speaker-grille-design
+16. Make Holes in SVG Shapes with fill-rule, https://www.svgrepo.com/blog/svg-fill-rule-holes/
+17. Improved SVG Import: Compound Paths - Shaper Tools, https://www.shapertools.com/en-us/blog/compound-paths
+18. Flatten.js, general SVG flattener. Flattens transformations of SVG, https://gist.github.com/alexjlockwood/c037140879806fb4d9820b7e70195494
+19. Converting svg path to polygon in javascript - Stack Overflow, https://stackoverflow.com/questions/15972912/converting-svg-path-to-polygon-in-javascript
+20. CompoundPath - Paper.js, https://paperjs.org/reference/compoundpath/
+21. SVG Data URI Encoder Guide: CSS, HTML, Base64, and Broken Icons, https://www.svggenie.com/blog/svg-data-uri-encoder-guide
+22. Browser Canvas 2D from Flutter Web: Paths, Pixels, and DPR, https://blog.redlinesoft.net/posts/flutter-web-canvas-api/
+23. Optimizing canvas - Web APIs | MDN, https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas
+24. DXF Reference - Autodesk, https://images.autodesk.com/adsk/files/autocad_2012_pdf_dxf-reference_enu.pdf
+25. Forcing DXF Export to use INSUNITS - Rhino for Mac - McNeel Forum, https://discourse.mcneel.com/t/forcing-dxf-export-to-use-insunits/25419
+26. tarikjabiri/dxf - NPM, https://www.npmjs.com/package/@tarikjabiri/dxf?activeTab=dependents
+27. https://solidvents.com/speaker-grille-pattern-generator/en
+28. Best CSS Background Pattern Libraries And Generators - CSS Author, https://cssauthor.com/best-css-background-pattern-libraries/
+29. HoleSnap: Vector Pattern Generator for SVG, DXF & STP, https://www.holesnap.com/
+30. Best Haikei Alternative 2026 — Free SVG Background Generator, https://superdesigner.co/compare/haikei-alternative
+31. MagicPattern - Beautiful backgrounds, patterns, gradients with 30+, https://www.magicpattern.design/
+32. Free SVG generators, color tools & web design tools, https://www.fffuel.co/
+33. Online DXF pattern generator for laser cutting and CNC - muraldxf.com, https://muraldxf.com/en/
+34. Pattern Designer - Parametric Pattern Generator - Parametric Tools, https://parametrictools.com/patterndesigner/
+35. Free Halftone & Dot Pattern Generator - SolidVents, https://solidvents.com/halftone-pattern-generator/en
+36. Image to Dot, Halftone & Perforation Pattern Generator - HoleSnap, https://www.holesnap.com/products/pattern
+37. Free Photo Halftone Generator | Free Vector SVG for Laser Engraving, https://www.mylasertools.com/photo-halftone-generator
+38. Vector Files for Laser Engraving: Best Format and Setup, https://sassydigitizing.com/blog/vector-art/laser-engraving-files
+39. A Note About File Size | OpenCascade.js, https://ocjs.org/docs/getting-started/file-size
+40. feat: add B-Rep STEP export via brepjs + OpenCascade · b292cc14eb, https://yakhub.com.tr/YakNet/snapcad-studio/commit/b292cc14ebee0ad583b3affd205102fc5f17a607?files=.gitignore
+41. Jost Font | Free Download, Pairings & Preview - Fontpair, https://fontpair.co/fonts/google/jost
+42. Jost - Variable Fonts, https://v-fonts.com/fonts/jost
+43. Jost - Sans Serif - Best Free Fonts, https://bestfreefonts.com/jost
+44. Google Fonts ve Türkçe: latin-ext Neden 85 KB? - Ömer Gülçiçek, https://omergulcicek.com/blog/google-fonts-turkce-karakterler
+45. Google webfonts that support UTF-8 (Turkish) characters?, https://stackoverflow.com/questions/22356993/google-webfonts-that-support-utf-8-turkish-characters
+46. Jost - Google Fonts, https://fonts.google.com/specimen/Jost
+47. Jost — Font Details & License | Fontsource, https://fontsource.org/fonts/jost/about
+48. 31 Best Free Fonts for Modern UI Design in 2026 (+ Typography, https://www.untitledui.com/blog/best-free-fonts
+49. Enough With Montserrat! Here Are Three Better Fonts That Deserve, https://thirdybaudin.me/enough-with-montserrat/
+50. Plus Jakarta Sans - Google Fonts, https://fonts.google.com/specimen/Plus+Jakarta+Sans
+51. Plus Jakarta Sans Fontu - cizimindir, https://www.cizimindir.com/en/font/plus-jakarta-sans
+52. Plus Jakarta Sans Font Preview, https://fontalternatives.com/fonts/plus-jakarta-sans/
+53. ‍25 Best Fonts for Websites in 2026: Expert Picks - Onething Design, https://www.onething.design/post/best-fonts-for-websites
+54. How to Use DXF Files with LightBurn: Step-by-Step Guide, https://freelaserfile.com/blog/how-to-use-dxf-files-lightburn
+55. Progressive Disclosure in UX Design: A 1-Minute Guide - Medium, https://medium.com/@prishitameshram/everything-you-need-to-know-about-progressive-disclosure-in-1-minute-fc245693accd
+56. Progressive Disclosure - NN/G, https://www.nngroup.com/articles/progressive-disclosure/
+57. What Is "Progressive Disclosure"? - DZone, https://dzone.com/articles/what-is-progressive-disclosure
+58. What is Progressive Disclosure? - Neuron UX, https://www.neuronux.com/glossary-term/progressive-disclosure
+59. Best Metal for Acoustic Speaker Grilles: A Material Guide, https://www.kingsiumetal.com/what-is-the-best-metal-for-acoustic-speaker-grilles.html
+60. On the effect of the grille on the acoustic frequency response of a, https://research.itu.edu.tr/tr/publications/on-the-effect-of-the-grille-on-the-acoustic-frequency-response-of/
+61. Speaker Grilles: How They Impact Sound Quality & Performance, https://eurocoincomponents.com/how-speaker-grilles-impact-sound-quality-in-professional-audio-systems/
+62. Conference Paper - PC Sound & Acoustics, https://pcsound.dk/wp-content/uploads/2024/02/AES_paper_2017_19198.pdf
+63. Pitch, Bridges & Margins for Heavy Gauge Perforated Plates, https://perfsheet.com/news/pitch-bridge-margins-heavy-gauge-perforated-plate/
+64. Converting SVG Path to Polygon - Phrogz.net, https://phrogz.net/svg/convert_path_to_polygon.xhtml
+65. Data URL Best Practices - Optimization Guidelines for Data URIs, https://datauri.ai/best-practices.html
+66. Canvas vs SVG for JavaScript Charts Compared - Fusioncharts.com, https://www.fusioncharts.com/blog/canvas-vs-svg-charts
+67. HTML Canvas Tutorial: 7 Interactive Beginner Examples | Savvy, https://savvy.co.il/en/blog/wordpress-development/html-canvas-beginners-guide/
+68. devicePixelRatio – Fundamentals and High DPI – Canvas 2D, https://webcodingcenter.com/canvas/canvas-fundamentals-and-high-dpi-setup--sharp-rendering-with-devicepixelratio.html
+69. HTML5 Canvas All Konva performance tips list, https://konvajs.org/docs/performance/All_Performance_Tips.html
+70. DXF format - Forums, Autodesk, https://forums.autodesk.com/t5/net-forum/dxf-format/td-p/2174884
+71. What's wrong with this DXF? - QCAD Forum, https://forum.qcad.org/t/whats-wrong-with-this-dxf/12184
+72. dxfjs/writer: A JavaScript dxf generator written in TypeScript. - GitHub, https://github.com/dxfjs/writer
+73. Getting started | dxfjs - tarikjabiri/dxf, https://dxf.vercel.app/guide/
+74. @tarikjabiri/dxf CDN by jsDelivr - A CDN for npm and GitHub, https://www.jsdelivr.com/package/npm/@tarikjabiri/dxf
+75. Adeeba Shah - Simutecra - Page 6 of 12, https://simutecra.com/blog/author/adeebashah/page/6/
+76. Lightburn turns fill color into stroke color in svg, https://forum.lightburnsoftware.com/t/lightburn-turns-fill-color-into-stroke-color-in-svg/115843
+77. What is the standard stroke size used when cutting?, https://forum.lightburnsoftware.com/t/what-is-the-standard-stroke-size-used-when-cutting/16467
+78. Optimise Artwork for Lasers: #1 Lightburn & SCAPS File Guide, https://thinklaser.com/news/optimise-artwork-for-lasers/
+79. Downloading canvas image using toBlob - javascript - Stack Overflow, https://stackoverflow.com/questions/44567511/downloading-canvas-image-using-toblob
+80. HTML5 Canvas Export to High Quality Image Tutorial - Konva.js, https://konvajs.org/docs/data_and_serialization/High-Quality-Export.html
+81. SVG CSS Background Image Guide: URL, Data URI, Size, Color, https://www.svggenie.com/blog/svg-css-background-image
+82. SVG URL Encoder - SVG to CSS Data URI - RJL.io, https://rjl.io/svg-url-encoder/
+83. GitHub - supunlakmal/spreadsheet: A lightweight, client-only, https://github.com/supunlakmal/spreadsheet
+84. Javascript string compression for URL hash parameter, https://stackoverflow.com/questions/28413880/javascript-string-compression-for-url-hash-parameter
+85. Mulberry32 in JavaScript - GitHub, https://github.com/cprosche/mulberry32
+86. Understanding how to use Mulberry32 to achieve deterministic, https://emanueleferonato.com/2026/01/08/understanding-how-to-use-mulberry32-to-achieve-deterministic-randomness-in-javascript/
+87. brepjs vs Replicad, https://brepjs.dev/compare/brepjs-vs-replicad
+88. Way forward · donalffons opencascade.js · Discussion #27 - GitHub, https://github.com/donalffons/opencascade.js/discussions/27
+89. replicad as a library, https://replicad.xyz/docs/use-as-a-library
+90. React.js, Vite, and Tailwind CSS | by azka abdillah - Medium, https://medium.com/@azkaabdillah006/getting-know-the-great-trio-of-modern-front-end-development-react-js-vite-and-tailwind-css-d0f2b115db15
+91. Free OpenSource Website Page Templates Collection by ... - GitHub, https://github.com/korbinzhao/free.website.templates
+92. Why Vite, https://vite.dev/guide/why
+93. Comparing the New Generation of Build Tools - CSS-Tricks, https://css-tricks.com/comparing-the-new-generation-of-build-tools/
+94. Vite on Vercel, https://vercel.com/docs/frameworks/frontend/vite
+95. Django Doesn't Have to Feel Old: Modernize Your Frontend with Vite, https://blog.kalvad.com/django-doesnt-have-to-feel-old-modernize-your-frontend-with-vite/
+96. Starting an Open Source Project, https://opensource.guide/starting-a-project/
+97. AutoCAD (.dwg, .dxf) import/export | Rhino 3-D modeling, http://docs.mcneel.com/rhino/6mac/help/en-us/fileio/autocad_dwg_dxf_import_export.htm
+98. Limits - Vercel, https://vercel.com/docs/limits
+99. Vercel Pricing: Hobby, Pro, and Enterprise plans, https://vercel.com/pricing
+100. Account Plans on Vercel, https://vercel.com/docs/plans
+101. fix: add cache and security headers to platform vercel.json #5208, https://github.com/vm0-ai/vm0/issues/5208
+102. Cache-Control headers - Vercel, https://vercel.com/docs/caching/cache-control-headers
+103. Open Graph (OG) Image Generation - Vercel, https://vercel.com/docs/og-image-generation
+104. Overengineering OpenGraph image generation on Vercel, https://dev.to/topcat/overengineering-opengraph-image-generation-on-vercel-5fh
+105. Dynamic open graph images with Sanity & Next.js - Roboto Studio, https://robotostudio.com/blog/dynamic-open-graph-with-sanity-and-next-js
+106. Inspecting your Open Graph metadata - Vercel, https://vercel.com/docs/deployments/og-preview
+107. Pricing for Web Analytics - Vercel, https://vercel.com/docs/analytics/limits-and-pricing
+108. Vercel Hobby Plan, https://vercel.com/docs/plans/hobby
+109. Pricing on Vercel, https://vercel.com/docs/pricing
+110. Web Analytics for Solo Founders and Small Teams: The Honest, https://muroanalytics.com/blog/web-analytics-for-small-teams
+111. Privacy-Friendly Analytics for U.S. Site Owners: 2026 Guide, https://ctrlaltorion.com/blog/privacy-friendly-analytics/
+112. Limits and Pricing for Speed Insights - Vercel, https://vercel.com/docs/speed-insights/limits-and-pricing
+113. Umami vs. Plausible – Open Source Analytics Comparison, https://umami.is/compare/plausible
+114. Plausible vs Umami vs Fathom Analytics 2026 - APIScout, https://apiscout.dev/guides/plausible-vs-umami-vs-fathom-analytics-2026
+115. Umami vs. Vercel Web Analytics - Webmaster Tips, https://www.wmtips.com/technologies/compare/umami-vs-vercel-web-analytics/
+116. Best Privacy-Friendly Analytics Tools in 2026 - DataCops, https://joindatacops.com/resources/best-privacy-friendly-analytics-tools-in-2026/
