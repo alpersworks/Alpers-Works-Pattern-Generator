@@ -463,14 +463,15 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
   const sanitized = sanitizeSvgDocument(rawSvg);
   if (!sanitized) return null;
 
-  // Mount temporarily offscreen so browser SVGGeometryElement computes exact curves & transforms
+  // Mount temporarily offscreen so browser SVGGeometryElement computes exact curves & transforms.
+  // NOTE: Do NOT set visibility:hidden on host, as visibility is inherited by children and would
+  // cause getComputedStyle(el).visibility === 'hidden' for every SVG shape!
   const host = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   host.setAttribute('width', '500');
   host.setAttribute('height', '500');
   host.style.position = 'fixed';
   host.style.left = '-99999px';
   host.style.top = '-99999px';
-  host.style.visibility = 'hidden';
   host.style.pointerEvents = 'none';
   document.body.appendChild(host);
 
@@ -482,8 +483,13 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
     const clone = document.importNode(sanitized, true) as unknown as SVGSVGElement;
     host.appendChild(clone);
 
-    const rootCtm = clone.getCTM?.();
-    const invRootCtm = rootCtm ? rootCtm.inverse() : null;
+    let invRootCtm: DOMMatrix | null = null;
+    try {
+      const rootCtm = clone.getCTM?.();
+      if (rootCtm) invRootCtm = rootCtm.inverse();
+    } catch {
+      invRootCtm = null;
+    }
 
     const elements = clone.querySelectorAll('*');
     elements.forEach((el) => {
