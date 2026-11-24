@@ -5,11 +5,11 @@ import {
   normalizeRingWinding,
 } from '../engine/shoelace';
 
-const ALLOWED_SHAPES = new Set(['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline']);
+const ALLOWED_SHAPES = new Set(['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline', 'line']);
 
 /**
- * Strictly sanitizes raw SVG markup by stripping scripts, foreignObject, event handlers,
- * external references, and non-geometry elements.
+ * Strictly sanitizes raw SVG markup by stripping scripts, foreignObject, defs/clipPaths,
+ * event handlers, external references, and non-geometry elements.
  */
 function sanitizeSvgDocument(rawSvg: string): SVGSVGElement | null {
   const parser = new DOMParser();
@@ -20,9 +20,10 @@ function sanitizeSvgDocument(rawSvg: string): SVGSVGElement | null {
   const root = doc.querySelector('svg');
   if (!root) return null;
 
-  // Strip dangerous nodes
+  // Strip dangerous nodes AND non-rendered definition containers (clipPath, mask, defs, symbol)
+  // so clipPath <rect> elements are never mistakenly rendered as solid shapes.
   const forbidden = root.querySelectorAll(
-    'script, foreignObject, iframe, object, embed, image, use, style, link, a'
+    'script, foreignObject, iframe, object, embed, image, use, style, link, a, defs, clipPath, mask, symbol, marker, pattern, title, desc, metadata'
   );
   forbidden.forEach((el) => el.remove());
 
@@ -40,122 +41,343 @@ function sanitizeSvgDocument(rawSvg: string): SVGSVGElement | null {
   return root as unknown as SVGSVGElement;
 }
 
-/**
- * Splits a compound SVG path `d` attribute into independent subpaths starting at each M/m command,
- * preserving inner holes without drawing fake connecting lines across them.
- */
-function splitSvgSubpaths(d: string): string[] {
-  const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
-  if (!tokens) return [];
+interface ParsedSegment {
+  kind: 'line' | 'curve';
+  /** Absolute start point */
+  x0: number;
+  y0: number;
+  /** Absolute end point */
+  x1: number;
+  y1: number;
+  /** Absolute single-segment SVG `d` string for curves (M x0 y0 <cmd> ...) */
+  curveD?: string;
+}
 
-  const subpaths: string[] = [];
-  let current: string[] = [];
+interface ParsedSubpath {
+  segments: ParsedSegment[];
+  closed: boolean;
+}
+
+/**
+ * W3C SVG 1.1 / SVG 2 spec-compliant path `d` parser.
+ * Properly handles:
+ * - Compact arc flags without spaces (e.g. `a150 150 0 10-300 0` or `a70,70,0,01140,0`)
+ * - Compact chained decimals (e.g. `1.5.5` -> `1.5`, `0.5`)
+ * - Implicit repeated commands (`M` -> `L`, `m` -> `l`)
+ * - Smooth cubic (`S`/`s`) and smooth quadratic (`T`/`t`) reflection control points
+ * - Multiple subpaths preserving inner holes independently
+ */
+export function parseSvgPathToSubpaths(d: string): ParsedSubpath[] {
+  const len = d.length;
+  let pos = 0;
+
+  const skipSeparators = () => {
+    while (pos < len) {
+      const ch = d.charCodeAt(pos);
+      // space, tab, LF, CR, comma
+      if (ch === 32 || ch === 9 || ch === 10 || ch === 13 || ch === 44) {
+        pos++;
+      } else {
+        break;
+      }
+    }
+  };
+
+  const isCommandChar = (ch: string) => /^[a-zA-Z]$/.test(ch);
+
+  const hasMoreNumbers = (): boolean => {
+    skipSeparators();
+    if (pos >= len) return false;
+    const ch = d[pos];
+    return ch === '+' || ch === '-' || ch === '.' || (ch >= '0' && ch <= '9');
+  };
+
+  const readNumber = (): number => {
+    skipSeparators();
+    const start = pos;
+    if (pos < len && (d[pos] === '+' || d[pos] === '-')) pos++;
+    let hasDigits = false;
+    while (pos < len && d[pos] >= '0' && d[pos] <= '9') {
+      pos++;
+      hasDigits = true;
+    }
+    if (pos < len && d[pos] === '.') {
+      pos++;
+      while (pos < len && d[pos] >= '0' && d[pos] <= '9') {
+        pos++;
+        hasDigits = true;
+      }
+    }
+    if (hasDigits && pos < len && (d[pos] === 'e' || d[pos] === 'E')) {
+      const expPos = pos;
+      pos++;
+      if (pos < len && (d[pos] === '+' || d[pos] === '-')) pos++;
+      let expDigits = false;
+      while (pos < len && d[pos] >= '0' && d[pos] <= '9') {
+        pos++;
+        expDigits = true;
+      }
+      if (!expDigits) pos = expPos;
+    }
+    if (pos === start) return NaN;
+    return parseFloat(d.slice(start, pos));
+  };
+
+  // Arc flags in SVG grammar are strictly single-character '0' or '1' (may have no delimiter after them!)
+  const readFlag = (): number => {
+    skipSeparators();
+    if (pos >= len) return NaN;
+    const ch = d[pos];
+    if (ch === '0' || ch === '1') {
+      pos++;
+      return ch === '1' ? 1 : 0;
+    }
+    return NaN;
+  };
+
+  const subpaths: ParsedSubpath[] = [];
+  let current: ParsedSubpath | null = null;
   let curX = 0;
   let curY = 0;
   let startX = 0;
   let startY = 0;
+  let lastCtrlX = 0;
+  let lastCtrlY = 0;
+  let lastCmd = '';
   let cmd = '';
-  let i = 0;
 
   const flush = () => {
-    if (current.length > 0) {
-      subpaths.push(current.join(' '));
-      current = [];
+    if (current && current.segments.length > 0) {
+      subpaths.push(current);
     }
+    current = null;
   };
 
-  while (i < tokens.length) {
-    const tok = tokens[i];
-    if (/^[a-zA-Z]$/.test(tok)) {
-      cmd = tok;
-      i++;
-      if (cmd === 'Z' || cmd === 'z') {
-        current.push('Z');
-        curX = startX;
-        curY = startY;
-        continue;
+  while (pos < len) {
+    skipSeparators();
+    if (pos >= len) break;
+
+    if (isCommandChar(d[pos])) {
+      cmd = d[pos++];
+    } else if (!cmd) {
+      pos++;
+      continue;
+    }
+
+    if (cmd === 'Z' || cmd === 'z') {
+      if (current) {
+        if (Math.hypot(curX - startX, curY - startY) > 1e-4) {
+          current.segments.push({ kind: 'line', x0: curX, y0: curY, x1: startX, y1: startY });
+        }
+        current.closed = true;
+        flush();
       }
+      curX = startX;
+      curY = startY;
+      lastCmd = cmd;
+      cmd = '';
+      continue;
     }
 
     if (cmd === 'M' || cmd === 'm') {
       flush();
-      const x = parseFloat(tokens[i++]);
-      const y = parseFloat(tokens[i++]);
+      const x = readNumber();
+      const y = readNumber();
       if (Number.isNaN(x) || Number.isNaN(y)) break;
-      const absX = cmd === 'm' ? curX + x : x;
-      const absY = cmd === 'm' ? curY + y : y;
-      curX = absX;
-      curY = absY;
-      startX = absX;
-      startY = absY;
-      current.push('M', String(absX), String(absY));
+      curX = cmd === 'm' ? curX + x : x;
+      curY = cmd === 'm' ? curY + y : y;
+      startX = curX;
+      startY = curY;
+      current = { segments: [], closed: false };
+      lastCmd = cmd;
       // Subsequent coordinate pairs after M/m are implicit L/l
       cmd = cmd === 'm' ? 'l' : 'L';
-    } else if (cmd === 'L' || cmd === 'l' || cmd === 'T' || cmd === 't') {
-      const x = parseFloat(tokens[i++]);
-      const y = parseFloat(tokens[i++]);
+      continue;
+    }
+
+    if (!current) {
+      current = { segments: [], closed: false };
+      startX = curX;
+      startY = curY;
+    }
+
+    if (cmd === 'L' || cmd === 'l') {
+      const x = readNumber();
+      const y = readNumber();
       if (Number.isNaN(x) || Number.isNaN(y)) break;
-      const isRel = cmd === 'l' || cmd === 't';
-      const absX = isRel ? curX + x : x;
-      const absY = isRel ? curY + y : y;
-      curX = absX;
-      curY = absY;
-      current.push(cmd.toUpperCase(), String(absX), String(absY));
+      const nx = cmd === 'l' ? curX + x : x;
+      const ny = cmd === 'l' ? curY + y : y;
+      current.segments.push({ kind: 'line', x0: curX, y0: curY, x1: nx, y1: ny });
+      curX = nx;
+      curY = ny;
+      lastCmd = cmd;
     } else if (cmd === 'H' || cmd === 'h') {
-      const x = parseFloat(tokens[i++]);
+      const x = readNumber();
       if (Number.isNaN(x)) break;
-      curX = cmd === 'h' ? curX + x : x;
-      current.push('L', String(curX), String(curY));
+      const nx = cmd === 'h' ? curX + x : x;
+      current.segments.push({ kind: 'line', x0: curX, y0: curY, x1: nx, y1: curY });
+      curX = nx;
+      lastCmd = cmd;
     } else if (cmd === 'V' || cmd === 'v') {
-      const y = parseFloat(tokens[i++]);
+      const y = readNumber();
       if (Number.isNaN(y)) break;
-      curY = cmd === 'v' ? curY + y : y;
-      current.push('L', String(curX), String(curY));
+      const ny = cmd === 'v' ? curY + y : y;
+      current.segments.push({ kind: 'line', x0: curX, y0: curY, x1: curX, y1: ny });
+      curY = ny;
+      lastCmd = cmd;
     } else if (cmd === 'C' || cmd === 'c') {
-      const nums = [0, 1, 2, 3, 4, 5].map(() => parseFloat(tokens[i++]));
-      if (nums.some(Number.isNaN)) break;
+      const x1 = readNumber();
+      const y1 = readNumber();
+      const x2 = readNumber();
+      const y2 = readNumber();
+      const x = readNumber();
+      const y = readNumber();
+      if ([x1, y1, x2, y2, x, y].some(Number.isNaN)) break;
       const isRel = cmd === 'c';
-      const x1 = isRel ? curX + nums[0] : nums[0];
-      const y1 = isRel ? curY + nums[1] : nums[1];
-      const x2 = isRel ? curX + nums[2] : nums[2];
-      const y2 = isRel ? curY + nums[3] : nums[3];
-      const x = isRel ? curX + nums[4] : nums[4];
-      const y = isRel ? curY + nums[5] : nums[5];
-      curX = x;
-      curY = y;
-      current.push('C', String(x1), String(y1), String(x2), String(y2), String(x), String(y));
-    } else if (cmd === 'S' || cmd === 's' || cmd === 'Q' || cmd === 'q') {
-      const nums = [0, 1, 2, 3].map(() => parseFloat(tokens[i++]));
-      if (nums.some(Number.isNaN)) break;
-      const isRel = cmd === 's' || cmd === 'q';
-      const x1 = isRel ? curX + nums[0] : nums[0];
-      const y1 = isRel ? curY + nums[1] : nums[1];
-      const x = isRel ? curX + nums[2] : nums[2];
-      const y = isRel ? curY + nums[3] : nums[3];
-      curX = x;
-      curY = y;
-      current.push(cmd.toUpperCase(), String(x1), String(y1), String(x), String(y));
+      const ax1 = isRel ? curX + x1 : x1;
+      const ay1 = isRel ? curY + y1 : y1;
+      const ax2 = isRel ? curX + x2 : x2;
+      const ay2 = isRel ? curY + y2 : y2;
+      const ax = isRel ? curX + x : x;
+      const ay = isRel ? curY + y : y;
+      current.segments.push({
+        kind: 'curve',
+        x0: curX,
+        y0: curY,
+        x1: ax,
+        y1: ay,
+        curveD: `M${curX} ${curY}C${ax1} ${ay1} ${ax2} ${ay2} ${ax} ${ay}`,
+      });
+      lastCtrlX = ax2;
+      lastCtrlY = ay2;
+      curX = ax;
+      curY = ay;
+      lastCmd = cmd;
+    } else if (cmd === 'S' || cmd === 's') {
+      const x2 = readNumber();
+      const y2 = readNumber();
+      const x = readNumber();
+      const y = readNumber();
+      if ([x2, y2, x, y].some(Number.isNaN)) break;
+      const isRel = cmd === 's';
+      const prevCubic = lastCmd === 'C' || lastCmd === 'c' || lastCmd === 'S' || lastCmd === 's';
+      const ax1 = prevCubic ? 2 * curX - lastCtrlX : curX;
+      const ay1 = prevCubic ? 2 * curY - lastCtrlY : curY;
+      const ax2 = isRel ? curX + x2 : x2;
+      const ay2 = isRel ? curY + y2 : y2;
+      const ax = isRel ? curX + x : x;
+      const ay = isRel ? curY + y : y;
+      current.segments.push({
+        kind: 'curve',
+        x0: curX,
+        y0: curY,
+        x1: ax,
+        y1: ay,
+        curveD: `M${curX} ${curY}C${ax1} ${ay1} ${ax2} ${ay2} ${ax} ${ay}`,
+      });
+      lastCtrlX = ax2;
+      lastCtrlY = ay2;
+      curX = ax;
+      curY = ay;
+      lastCmd = cmd;
+    } else if (cmd === 'Q' || cmd === 'q') {
+      const x1 = readNumber();
+      const y1 = readNumber();
+      const x = readNumber();
+      const y = readNumber();
+      if ([x1, y1, x, y].some(Number.isNaN)) break;
+      const isRel = cmd === 'q';
+      const ax1 = isRel ? curX + x1 : x1;
+      const ay1 = isRel ? curY + y1 : y1;
+      const ax = isRel ? curX + x : x;
+      const ay = isRel ? curY + y : y;
+      current.segments.push({
+        kind: 'curve',
+        x0: curX,
+        y0: curY,
+        x1: ax,
+        y1: ay,
+        curveD: `M${curX} ${curY}Q${ax1} ${ay1} ${ax} ${ay}`,
+      });
+      lastCtrlX = ax1;
+      lastCtrlY = ay1;
+      curX = ax;
+      curY = ay;
+      lastCmd = cmd;
+    } else if (cmd === 'T' || cmd === 't') {
+      const x = readNumber();
+      const y = readNumber();
+      if (Number.isNaN(x) || Number.isNaN(y)) break;
+      const isRel = cmd === 't';
+      const prevQuad = lastCmd === 'Q' || lastCmd === 'q' || lastCmd === 'T' || lastCmd === 't';
+      const ax1 = prevQuad ? 2 * curX - lastCtrlX : curX;
+      const ay1 = prevQuad ? 2 * curY - lastCtrlY : curY;
+      const ax = isRel ? curX + x : x;
+      const ay = isRel ? curY + y : y;
+      current.segments.push({
+        kind: 'curve',
+        x0: curX,
+        y0: curY,
+        x1: ax,
+        y1: ay,
+        curveD: `M${curX} ${curY}Q${ax1} ${ay1} ${ax} ${ay}`,
+      });
+      lastCtrlX = ax1;
+      lastCtrlY = ay1;
+      curX = ax;
+      curY = ay;
+      lastCmd = cmd;
     } else if (cmd === 'A' || cmd === 'a') {
-      const rx = parseFloat(tokens[i++]);
-      const ry = parseFloat(tokens[i++]);
-      const rot = parseFloat(tokens[i++]);
-      const laf = parseFloat(tokens[i++]);
-      const sf = parseFloat(tokens[i++]);
-      const x = parseFloat(tokens[i++]);
-      const y = parseFloat(tokens[i++]);
+      const rx = readNumber();
+      const ry = readNumber();
+      const rot = readNumber();
+      const laf = readFlag();
+      const sf = readFlag();
+      const x = readNumber();
+      const y = readNumber();
       if ([rx, ry, rot, laf, sf, x, y].some(Number.isNaN)) break;
-      const absX = cmd === 'a' ? curX + x : x;
-      const absY = cmd === 'a' ? curY + y : y;
-      curX = absX;
-      curY = absY;
-      current.push('A', String(rx), String(ry), String(rot), String(laf), String(sf), String(absX), String(absY));
+      const ax = cmd === 'a' ? curX + x : x;
+      const ay = cmd === 'a' ? curY + y : y;
+      current.segments.push({
+        kind: 'curve',
+        x0: curX,
+        y0: curY,
+        x1: ax,
+        y1: ay,
+        curveD: `M${curX} ${curY}A${rx} ${ry} ${rot} ${laf} ${sf} ${ax} ${ay}`,
+      });
+      curX = ax;
+      curY = ay;
+      lastCmd = cmd;
     } else {
-      i++;
+      break;
+    }
+
+    if (!hasMoreNumbers()) {
+      cmd = '';
     }
   }
 
   flush();
   return subpaths;
+}
+
+function dedupeRing(ring: PolygonRing, eps = 1e-4): PolygonRing {
+  const out: PolygonRing = [];
+  for (const p of ring) {
+    const prev = out[out.length - 1];
+    if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > eps) {
+      out.push(p);
+    }
+  }
+  if (out.length > 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= eps) {
+      out.pop();
+    }
+  }
+  return out;
 }
 
 function pointInRing(pt: Point2D, ring: PolygonRing): boolean {
@@ -173,8 +395,69 @@ function pointInRing(pt: Point2D, ring: PolygonRing): boolean {
 }
 
 /**
+ * Expands an open or closed polyline with strokeWidth into a closed solid ribbon polygon
+ * so stroke-only SVGs (fill="none", stroke="...") import cleanly as solid shapes.
+ */
+function expandStrokedPolyline(pts: Point2D[], halfWidth: number, closed: boolean): PolygonRing {
+  const n = pts.length;
+  if (n < 2 || halfWidth <= 1e-4) return [];
+
+  const left: Point2D[] = [];
+  const right: Point2D[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prev = pts[i > 0 ? i - 1 : closed ? n - 1 : i];
+    const curr = pts[i];
+    const next = pts[i < n - 1 ? i + 1 : closed ? 0 : i];
+
+    let dx = next.x - prev.x;
+    let dy = next.y - prev.y;
+    const l = Math.hypot(dx, dy);
+    if (l < 1e-6) continue;
+    dx /= l;
+    dy /= l;
+
+    const nx = -dy * halfWidth;
+    const ny = dx * halfWidth;
+    left.push({ x: curr.x + nx, y: curr.y + ny });
+    right.push({ x: curr.x - nx, y: curr.y - ny });
+  }
+
+  return dedupeRing([...left, ...right.reverse()]);
+}
+
+function isElementVisible(el: Element): { visible: boolean; strokedOnly: boolean; strokeWidth: number } {
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden') {
+    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+  }
+  const opacity = parseFloat(style.opacity || '1');
+  if (!Number.isNaN(opacity) && opacity <= 0.01) {
+    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+  }
+
+  const fillAttr = el.getAttribute('fill')?.trim().toLowerCase();
+  const strokeAttr = el.getAttribute('stroke')?.trim().toLowerCase();
+  const fillNone = fillAttr === 'none' || style.fill === 'none' || style.fill === 'transparent';
+  const strokeNone =
+    !strokeAttr
+      ? style.stroke === 'none' || style.stroke === 'transparent' || !style.stroke
+      : strokeAttr === 'none';
+
+  const sw = parseFloat(el.getAttribute('stroke-width') || style.strokeWidth || '0') || 0;
+
+  if (fillNone && (strokeNone || sw <= 0)) {
+    // Invisible artboard / bounding box rectangle (e.g., <rect width="512" height="512" fill="none"/>)
+    return { visible: false, strokedOnly: false, strokeWidth: 0 };
+  }
+
+  return { visible: true, strokedOnly: fillNone && !strokeNone && sw > 0, strokeWidth: sw };
+}
+
+/**
  * Universal SVG motif importer supporting <path>, <rect>, <circle>, <ellipse>,
- * <polygon>, and <polyline>, preserving compound holes and normalizing to ~20mm baseline.
+ * <polygon>, <polyline>, and <line>, preserving sharp corners, compact arc flags,
+ * compound evenodd holes, and normalizing to ~20mm baseline.
  */
 export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvgMotifData | null {
   const sanitized = sanitizeSvgDocument(rawSvg);
@@ -192,66 +475,141 @@ export function parseCustomSvgMotif(rawSvg: string, fileName: string): CustomSvg
   document.body.appendChild(host);
 
   const rawRings: PolygonRing[] = [];
+  const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  host.appendChild(tempPath);
 
   try {
-    const clone = document.importNode(sanitized, true);
+    const clone = document.importNode(sanitized, true) as unknown as SVGSVGElement;
     host.appendChild(clone);
+
+    const rootCtm = clone.getCTM?.();
+    const invRootCtm = rootCtm ? rootCtm.inverse() : null;
 
     const elements = clone.querySelectorAll('*');
     elements.forEach((el) => {
       const tag = el.tagName.toLowerCase();
       if (!ALLOWED_SHAPES.has(tag)) return;
 
+      const vis = isElementVisible(el);
+      if (!vis.visible) return;
+
       const geomEl = el as unknown as SVGGeometryElement;
-      const ctm = geomEl.getCTM?.();
+      const elCtm = geomEl.getCTM?.();
+      const relCtm = elCtm && invRootCtm ? invRootCtm.multiply(elCtm) : elCtm;
+
       const applyCtm = (x: number, y: number): Point2D => {
-        if (!ctm) return { x, y };
+        if (!relCtm) return { x, y };
         return {
-          x: ctm.a * x + ctm.c * y + ctm.e,
-          y: ctm.b * x + ctm.d * y + ctm.f,
+          x: relCtm.a * x + relCtm.c * y + relCtm.e,
+          y: relCtm.b * x + relCtm.d * y + relCtm.f,
         };
+      };
+
+      const pushPolygon = (pts: Point2D[], closed: boolean) => {
+        const cleaned = dedupeRing(pts);
+        if (vis.strokedOnly) {
+          const scaleFactor = relCtm ? Math.hypot(relCtm.a, relCtm.b) : 1;
+          const halfW = (vis.strokeWidth * Math.max(0.01, scaleFactor)) * 0.5;
+          const ribbon = expandStrokedPolyline(cleaned, halfW, closed);
+          if (ribbon.length >= 3) rawRings.push(ribbon);
+        } else if (cleaned.length >= 3) {
+          rawRings.push(cleaned);
+        }
       };
 
       if (tag === 'path') {
         const d = el.getAttribute('d') || '';
-        const subpaths = splitSvgSubpaths(d);
+        const subpaths = parseSvgPathToSubpaths(d);
         for (const sub of subpaths) {
-          const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          tempPath.setAttribute('d', sub);
-          host.appendChild(tempPath);
-          const totalLen = tempPath.getTotalLength();
-          if (totalLen > 0.01) {
-            const samples = Math.min(72, Math.max(16, Math.round(totalLen * 0.6)));
-            const ring: PolygonRing = [];
-            for (let i = 0; i < samples; i++) {
-              const p = tempPath.getPointAtLength((i / samples) * totalLen);
-              ring.push(applyCtm(p.x, p.y));
+          const ring: Point2D[] = [];
+          for (const seg of sub.segments) {
+            if (ring.length === 0) {
+              ring.push(applyCtm(seg.x0, seg.y0));
             }
-            if (ring.length >= 3) rawRings.push(ring);
+            if (seg.kind === 'line') {
+              ring.push(applyCtm(seg.x1, seg.y1));
+            } else if (seg.curveD) {
+              tempPath.setAttribute('d', seg.curveD);
+              const segLen = tempPath.getTotalLength();
+              const steps = Math.min(20, Math.max(6, Math.ceil(segLen / 12)));
+              for (let s = 1; s <= steps; s++) {
+                const p = tempPath.getPointAtLength((s / steps) * segLen);
+                ring.push(applyCtm(p.x, p.y));
+              }
+            }
           }
-          tempPath.remove();
+          pushPolygon(ring, sub.closed);
+        }
+      } else if (tag === 'rect') {
+        const x = parseFloat(el.getAttribute('x') || '0') || 0;
+        const y = parseFloat(el.getAttribute('y') || '0') || 0;
+        const w = parseFloat(el.getAttribute('width') || '0') || 0;
+        const h = parseFloat(el.getAttribute('height') || '0') || 0;
+        const rx = Math.min(w * 0.5, parseFloat(el.getAttribute('rx') || el.getAttribute('ry') || '0') || 0);
+        const ry = Math.min(h * 0.5, parseFloat(el.getAttribute('ry') || el.getAttribute('rx') || '0') || 0);
+        if (w > 0 && h > 0) {
+          if (rx <= 1e-4 && ry <= 1e-4) {
+            pushPolygon(
+              [
+                applyCtm(x, y),
+                applyCtm(x + w, y),
+                applyCtm(x + w, y + h),
+                applyCtm(x, y + h),
+              ],
+              true
+            );
+          } else {
+            const pts: Point2D[] = [];
+            const arcSteps = 6;
+            const corners = [
+              { cx: x + w - rx, cy: y + h - ry, start: 0, end: Math.PI * 0.5 },
+              { cx: x + rx, cy: y + h - ry, start: Math.PI * 0.5, end: Math.PI },
+              { cx: x + rx, cy: y + ry, start: Math.PI, end: Math.PI * 1.5 },
+              { cx: x + w - rx, cy: y + ry, start: Math.PI * 1.5, end: Math.PI * 2 },
+            ];
+            for (const c of corners) {
+              for (let i = 0; i <= arcSteps; i++) {
+                const a = c.start + (i / arcSteps) * (c.end - c.start);
+                pts.push(applyCtm(c.cx + Math.cos(a) * rx, c.cy + Math.sin(a) * ry));
+              }
+            }
+            pushPolygon(pts, true);
+          }
+        }
+      } else if (tag === 'circle' || tag === 'ellipse') {
+        const cx = parseFloat(el.getAttribute('cx') || '0') || 0;
+        const cy = parseFloat(el.getAttribute('cy') || '0') || 0;
+        const rx =
+          tag === 'circle'
+            ? parseFloat(el.getAttribute('r') || '0') || 0
+            : parseFloat(el.getAttribute('rx') || '0') || 0;
+        const ry =
+          tag === 'circle' ? rx : parseFloat(el.getAttribute('ry') || '0') || 0;
+        if (rx > 0 && ry > 0) {
+          const segs = 36;
+          const pts: Point2D[] = [];
+          for (let i = 0; i < segs; i++) {
+            const a = (i / segs) * Math.PI * 2;
+            pts.push(applyCtm(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry));
+          }
+          pushPolygon(pts, true);
         }
       } else if (tag === 'polygon' || tag === 'polyline') {
         const ptsAttr = (el.getAttribute('points') || '').trim();
         const nums = ptsAttr.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
-        if (nums && nums.length >= 6) {
+        if (nums && nums.length >= 4) {
           const ring: PolygonRing = [];
           for (let i = 0; i + 1 < nums.length; i += 2) {
             ring.push(applyCtm(parseFloat(nums[i]), parseFloat(nums[i + 1])));
           }
-          if (ring.length >= 3) rawRings.push(ring);
+          pushPolygon(ring, tag === 'polygon');
         }
-      } else if (typeof geomEl.getTotalLength === 'function') {
-        const totalLen = geomEl.getTotalLength();
-        if (totalLen > 0.01) {
-          const samples = tag === 'rect' ? 24 : 36;
-          const ring: PolygonRing = [];
-          for (let i = 0; i < samples; i++) {
-            const p = geomEl.getPointAtLength((i / samples) * totalLen);
-            ring.push(applyCtm(p.x, p.y));
-          }
-          if (ring.length >= 3) rawRings.push(ring);
-        }
+      } else if (tag === 'line' && vis.strokedOnly) {
+        const x1 = parseFloat(el.getAttribute('x1') || '0') || 0;
+        const y1 = parseFloat(el.getAttribute('y1') || '0') || 0;
+        const x2 = parseFloat(el.getAttribute('x2') || '0') || 0;
+        const y2 = parseFloat(el.getAttribute('y2') || '0') || 0;
+        pushPolygon([applyCtm(x1, y1), applyCtm(x2, y2)], false);
       }
     });
   } finally {
@@ -329,7 +687,6 @@ export function parseCustomPanelSvg(rawSvg: string, fileName: string): CustomPan
   const motif = parseCustomSvgMotif(rawSvg, fileName);
   if (!motif || motif.rings.length === 0) return null;
 
-  // Largest outer contour is already sorted first by parseCustomSvgMotif
   const outer = motif.rings[0];
   if (outer.length < 3) return null;
 
@@ -348,7 +705,6 @@ export function parseCustomPanelSvg(rawSvg: string, fileName: string): CustomPan
   const h = maxY - minY;
   if (w < 1e-4 || h < 1e-4) return null;
 
-  // Resample if excessively dense so 60 FPS SDF stays fast
   const maxPts = 84;
   const step = outer.length > maxPts ? Math.ceil(outer.length / maxPts) : 1;
   const points: Point2D[] = [];
